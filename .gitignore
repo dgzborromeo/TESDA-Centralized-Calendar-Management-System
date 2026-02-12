@@ -1,0 +1,14 @@
+# Dependencies
+node_modules/
+
+# Environment variables (SECURITY!)
+.env
+
+# Logs
+*.log
+stderr.log
+
+# Build and Temp files
+.builds/
+tmp/
+uploads/

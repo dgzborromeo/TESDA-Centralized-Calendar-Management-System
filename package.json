@@ -1,0 +1,22 @@
+{
+  "name": "tesda-calendar-api",
+  "version": "1.0.0",
+  "description": "Calendar system API with auth and conflict detection",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "seed:clusters": "node scripts/seed-cluster-users.js",
+    "migrate:end-date": "node scripts/migrate-add-end-date.js",
+    "migrate:attachments": "node scripts/migrate-event-attachments.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^2.0.2",
+    "mysql2": "^3.6.5"
+  }
+}

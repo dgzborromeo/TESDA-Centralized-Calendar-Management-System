@@ -1,0 +1,25 @@
+# --- Hostinger Node.js Web App Config ---
+# Fixed the path: removed "://" and added "/public_html"
+PassengerAppRoot /home/u782169281/domains/sienna-jay-693502.hostingersite.com/public_html
+PassengerAppType node
+PassengerNodejs /opt/alt/alt-nodejs22/root/bin/node
+PassengerStartupFile server.js
+# ----------------------------------------
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+
+  # 1. API - Let Passenger handle all requests starting with /api
+  RewriteCond %{REQUEST_URI} ^/api [NC]
+  RewriteRule ^api/ - [L]
+
+  # 2. STATIC FILES - Serve React assets (JS/CSS) if they exist
+  RewriteCond %{REQUEST_FILENAME} -f [OR]
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule ^ - [L]
+
+  # 3. REACT ROUTER - Redirect all other paths to index.html
+  RewriteRule ^ index.html [L]
+</IfModule>
+PassengerBaseURI /
