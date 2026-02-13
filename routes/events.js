@@ -103,7 +103,21 @@ async function getParticipantConflicts({ date, startTime, endTime, participantId
   const idPlaceholders = ids.map(() => '?').join(', ');
   let sql = `
     SELECT DISTINCT
-      e.id, e.title, e.date, e.end_date, e.start_time, e.end_time
+      e.id, e.title, e.date, e.end_date, e.start_time, e.end_time,
+      (
+        SELECT GROUP_CONCAT(DISTINCT u.name ORDER BY u.name SEPARATOR ', ')
+        FROM users u
+        WHERE u.id IN (${idPlaceholders})
+          AND (
+            u.id = e.created_by
+            OR EXISTS (
+              SELECT 1
+              FROM event_attendees ea2
+              WHERE ea2.event_id = e.id
+                AND ea2.user_id = u.id
+            )
+          )
+      ) AS overlapping_participants
     FROM events e
     WHERE e.date <= ?
       AND COALESCE(e.end_date, e.date) >= ?
@@ -119,7 +133,7 @@ async function getParticipantConflicts({ date, startTime, endTime, participantId
         )
       )
   `;
-  const params = [date, date, endTime, startTime, ...ids, ...ids];
+  const params = [...ids, date, date, endTime, startTime, ...ids, ...ids];
   if (excludeEventId) {
     sql += ' AND e.id != ?';
     params.push(excludeEventId);
@@ -401,6 +415,7 @@ router.post('/', upload.single('attachment'), async (req, res) => {
             date: toYMD(c.date) || d,
             start_time: c.start_time,
             end_time: c.end_time,
+            overlapping_participants: c.overlapping_participants || '',
           }))
         );
       }
@@ -539,7 +554,14 @@ router.put('/:id', async (req, res) => {
     if (conflictRows.length > 0) {
       return res.status(409).json({
         error: 'Selected participant(s) have overlapping schedule in this time slot.',
-        conflicts: conflictRows.map((c) => ({ id: c.id, title: c.title, date: c.date, start_time: c.start_time, end_time: c.end_time })),
+        conflicts: conflictRows.map((c) => ({
+          id: c.id,
+          title: c.title,
+          date: c.date,
+          start_time: c.start_time,
+          end_time: c.end_time,
+          overlapping_participants: c.overlapping_participants || '',
+        })),
       });
     }
     await db.query(
