@@ -59,6 +59,16 @@ function isWeekendYMD(ymd) {
   return day === 0 || day === 6;
 }
 
+function isEventDoneRecord(eventRow) {
+  const date = toYMD(eventRow?.date);
+  const endDate = toYMD(eventRow?.end_date) || date;
+  const endTime = String(eventRow?.end_time || '').slice(0, 8);
+  if (!date || !endDate || !endTime) return false;
+  const endAt = new Date(`${endDate}T${endTime}`);
+  if (!Number.isFinite(endAt.getTime())) return false;
+  return new Date() >= endAt;
+}
+
 function datesInRange(startYmd, endYmd) {
   const start = String(startYmd || '').slice(0, 10);
   const end = String(endYmd || '').slice(0, 10);
@@ -382,8 +392,12 @@ router.post('/', upload.single('attachment'), async (req, res) => {
     }
     const startDate = String(date).slice(0, 10);
     const endDate = String(end_date || date).slice(0, 10);
+    const todayYmd = toYMD(new Date());
     if (endDate < startDate) {
       return res.status(400).json({ error: 'End date must be the same as or after start date.' });
+    }
+    if (startDate < todayYmd) {
+      return res.status(400).json({ error: 'Past dates are view-only. Please select today or a future date.' });
     }
     const dateList = datesInRange(startDate, endDate);
     if (!dateList.length) {
@@ -493,6 +507,9 @@ router.put('/:id', async (req, res) => {
     const [events] = await db.query('SELECT * FROM events WHERE id = ?', [req.params.id]);
     if (events.length === 0) return res.status(404).json({ error: 'Event not found.' });
     if (!canModify(req, events[0])) return res.status(403).json({ error: 'Access denied.' });
+    if (isEventDoneRecord(events[0])) {
+      return res.status(400).json({ error: 'This event is already done and is now view-only.' });
+    }
     const { title, type, date, end_date, start_time, end_time, location, description, color, attendee_ids } = req.body;
     const e = events[0];
     const existingDate = toYMD(e.date);
@@ -625,6 +642,9 @@ router.delete('/:id', async (req, res) => {
     const [events] = await db.query('SELECT * FROM events WHERE id = ?', [req.params.id]);
     if (events.length === 0) return res.status(404).json({ error: 'Event not found.' });
     if (!canModify(req, events[0])) return res.status(403).json({ error: 'Access denied.' });
+    if (isEventDoneRecord(events[0])) {
+      return res.status(400).json({ error: 'This event is already done and is now view-only.' });
+    }
     await db.query('DELETE FROM events WHERE id = ?', [req.params.id]);
     res.json({ success: true });
   } catch (err) {
