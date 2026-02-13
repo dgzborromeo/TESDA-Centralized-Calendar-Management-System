@@ -8,7 +8,7 @@ const path = require('path');
 const multer = require('multer');
 const db = require('../config/db');
 const { auth, requireAdmin } = require('../middleware/auth');
-const { getConflicts, logConflict, getConflictsForEvent } = require('../utils/conflictDetection');
+const { getConflictsForEvent } = require('../utils/conflictDetection');
 const { resolveUserNameConfig } = require('../utils/userName');
 const { toYMD } = require('../utils/dateCoerce');
 const {
@@ -94,6 +94,39 @@ function parseAttendeeIds(raw) {
 
 function attachmentPublicPath(fileName) {
   return `/uploads/events/${encodeURIComponent(fileName)}`;
+}
+
+async function getParticipantConflicts({ date, startTime, endTime, participantIds, excludeEventId = null }) {
+  const ids = Array.from(new Set((participantIds || []).map((n) => parseInt(n, 10)).filter((n) => Number.isFinite(n))));
+  if (!ids.length) return [];
+
+  const idPlaceholders = ids.map(() => '?').join(', ');
+  let sql = `
+    SELECT DISTINCT
+      e.id, e.title, e.date, e.end_date, e.start_time, e.end_time
+    FROM events e
+    WHERE e.date <= ?
+      AND COALESCE(e.end_date, e.date) >= ?
+      AND e.start_time < ?
+      AND e.end_time > ?
+      AND (
+        e.created_by IN (${idPlaceholders})
+        OR EXISTS (
+          SELECT 1
+          FROM event_attendees ea
+          WHERE ea.event_id = e.id
+            AND ea.user_id IN (${idPlaceholders})
+        )
+      )
+  `;
+  const params = [date, date, endTime, startTime, ...ids, ...ids];
+  if (excludeEventId) {
+    sql += ' AND e.id != ?';
+    params.push(excludeEventId);
+  }
+  sql += ' ORDER BY e.date, e.start_time';
+  const [rows] = await db.query(sql, params);
+  return rows;
 }
 
 // GET /api/events - list events (filter by date range, user, search q for title/location)
@@ -350,10 +383,16 @@ router.post('/', upload.single('attachment'), async (req, res) => {
       return res.status(400).json({ error: 'End time must be after start time.' });
     }
 
-    // Detect conflicts against all events for everyone across the whole date range.
+    // Participant conflict only (time overlap is allowed if participants don't overlap).
+    const participantIds = [req.user.id, ...attendee_ids];
     const conflictsByDate = [];
     for (const d of dateList) {
-      const conflicts = await getConflicts(d, start_time, end_time, null, req.user.id, 'admin');
+      const conflicts = await getParticipantConflicts({
+        date: d,
+        startTime: start_time,
+        endTime: end_time,
+        participantIds,
+      });
       if (conflicts.length > 0) {
         conflictsByDate.push(
           ...conflicts.map((c) => ({
@@ -368,7 +407,7 @@ router.post('/', upload.single('attachment'), async (req, res) => {
     }
     if (conflictsByDate.length > 0) {
       return res.status(409).json({
-        error: 'Selected time conflicts with existing event(s). Please adjust the time.',
+        error: 'Selected participant(s) have overlapping schedule in this time slot.',
         conflicts: conflictsByDate,
       });
     }
@@ -473,17 +512,33 @@ router.put('/:id', async (req, res) => {
     if (new Date(`1970-01-01T${newEnd}`) <= new Date(`1970-01-01T${newStart}`)) {
       return res.status(400).json({ error: 'End time must be after start time.' });
     }
-    // Detect conflicts against all events for everyone across the full event range.
+    // Participant conflict only (time overlap is allowed if participants don't overlap).
+    let nextAttendeeIds = [];
+    if (attendee_ids !== undefined && Array.isArray(attendee_ids)) {
+      nextAttendeeIds = attendee_ids
+        .map((x) => parseInt(x, 10))
+        .filter((n) => Number.isFinite(n));
+    } else {
+      const [existingAttendees] = await db.query('SELECT user_id FROM event_attendees WHERE event_id = ?', [req.params.id]);
+      nextAttendeeIds = existingAttendees.map((r) => r.user_id);
+    }
+    const participantIds = [e.created_by, ...nextAttendeeIds];
     const conflictRows = [];
     for (const d of dateList) {
-      const conflicts = await getConflicts(d, newStart, newEnd, parseInt(req.params.id, 10), req.user.id, 'admin');
+      const conflicts = await getParticipantConflicts({
+        date: d,
+        startTime: newStart,
+        endTime: newEnd,
+        participantIds,
+        excludeEventId: parseInt(req.params.id, 10),
+      });
       if (conflicts.length > 0) {
         conflictRows.push(...conflicts.map((c) => ({ ...c, date: c.date ? toYMD(c.date) : d })));
       }
     }
     if (conflictRows.length > 0) {
       return res.status(409).json({
-        error: 'Selected time conflicts with existing event(s). Please adjust the time.',
+        error: 'Selected participant(s) have overlapping schedule in this time slot.',
         conflicts: conflictRows.map((c) => ({ id: c.id, title: c.title, date: c.date, start_time: c.start_time, end_time: c.end_time })),
       });
     }
@@ -559,6 +614,7 @@ router.delete('/:id', async (req, res) => {
 router.post('/check-conflict', async (req, res) => {
   try {
     const { date, end_date, start_time, end_time, exclude_event_id } = req.body;
+    const attendee_ids = parseAttendeeIds(req.body?.attendee_ids);
     if (!date || !start_time || !end_time) {
       return res.status(400).json({ error: 'Date, start_time and end_time required.' });
     }
@@ -575,13 +631,22 @@ router.post('/check-conflict', async (req, res) => {
       return res.status(400).json({ error: 'Weekends are locked. Please use weekdays only in the selected date range.' });
     }
     const merged = [];
+    let baseParticipantId = req.user.id;
+    if (exclude_event_id) {
+      const [rows] = await db.query('SELECT created_by FROM events WHERE id = ?', [parseInt(exclude_event_id, 10)]);
+      if (rows.length > 0 && Number.isFinite(rows[0].created_by)) {
+        baseParticipantId = rows[0].created_by;
+      }
+    }
+    const participantIds = [baseParticipantId, ...attendee_ids];
     for (const d of dateList) {
-      const conflicts = await getConflicts(
-        d, start_time, end_time,
-        exclude_event_id ? parseInt(exclude_event_id, 10) : null,
-        req.user.id,
-        'admin'
-      );
+      const conflicts = await getParticipantConflicts({
+        date: d,
+        startTime: start_time,
+        endTime: end_time,
+        participantIds,
+        excludeEventId: exclude_event_id ? parseInt(exclude_event_id, 10) : null,
+      });
       merged.push(
         ...conflicts.map((c) => ({
           ...c,
