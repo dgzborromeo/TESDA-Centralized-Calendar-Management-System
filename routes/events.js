@@ -160,7 +160,13 @@ router.get('/', async (req, res) => {
     const cfg = await resolveUserNameConfig(db);
     let sql = `
       SELECT e.*, ${cfg.selectExpr('u')} AS creator_name,
-        (SELECT COUNT(*) FROM conflicts c WHERE c.event_id = e.id) AS conflict_count
+        (SELECT COUNT(*) FROM conflicts c WHERE c.event_id = e.id) AS conflict_count,
+        (
+          SELECT GROUP_CONCAT(DISTINCT ${cfg.selectExpr('u2')} ORDER BY ${cfg.selectExpr('u2')} SEPARATOR ', ')
+          FROM event_attendees ea
+          JOIN users u2 ON u2.id = ea.user_id
+          WHERE ea.event_id = e.id
+        ) AS participants_summary
       FROM events e
       LEFT JOIN users u ON u.id = e.created_by
       WHERE 1=1
