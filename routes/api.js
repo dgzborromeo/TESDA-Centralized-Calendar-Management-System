@@ -3,15 +3,10 @@ const router = express.Router();
 
 // Import Controllers
 const userProfileController = require('../controllers/userProfileController');
-const authController = require('../controllers/authController'); // Halimbawa lang
 
 // Import Middlewares
 const { auth } = require('../middleware/auth');
 const upload = require('../middleware/uploadMiddleware');
-
-// --- AUTH ROUTES ---
-router.post('/register', authController.register);
-router.post('/login', authController.login);
 
 // --- USER PROFILE ROUTES ---
 // Lahat ng profile routes ay dadaan sa auth middleware
