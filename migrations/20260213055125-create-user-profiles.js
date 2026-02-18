@@ -1,4 +1,7 @@
 'use strict';
+
+const { CLUSTER_LEGEND } = require("../utils/clusterLegend");
+
 module.exports = {
   async up(queryInterface, Sequelize) {
     await queryInterface.createTable('user_profiles', {
@@ -20,8 +23,12 @@ module.exports = {
       middle_name: {type: Sequelize.STRING, allowNull: true },
       last_name: { type: Sequelize.STRING, allowNull: false },
       designation: { type: Sequelize.STRING, allowNull: true }, // Hal: "Director IV", "Instructor I"
-      phone_number: { type: Sequelize.STRING(20) },
-      office_department: { type: Sequelize.STRING },
+      phone_number: { type: Sequelize.STRING(20), allowNull: true},
+      office: { type: Sequelize.STRING, allowNull: true },
+      division: { type: Sequelize.STRING, allowNull: true },
+      cluster: { type: Sequelize.STRING, allowNull: true },
+      province_district: { type: Sequelize.STRING, allowNull: true },
+      region: { type: Sequelize.STRING, allowNull: true },
       picture: { type: Sequelize.STRING, allowNull: true },     // URL or Path ng Profile Pic
       qr_code: { type: Sequelize.TEXT, allowNull: true },      // Pwedeng Path or Base64 String ng QR
       created_at: {

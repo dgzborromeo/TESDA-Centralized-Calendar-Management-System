@@ -24,9 +24,9 @@ app.use('/api/auth', authRoutes);
 app.use('/api/events', eventsRoutes);
 app.use('/api/users', usersRoutes);
 app.use('/api/invitations', invitationsRoutes);
-app.use('/api', apiRoutes);
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
+app.use('/api', apiRoutes);
 
 app.use((err, req, res, next) => {
   console.error(err);
