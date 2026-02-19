@@ -243,7 +243,10 @@ router.get('/', async (req, res) => {
     );
   } catch (err) {
     console.error('List events:', err);
-    res.status(500).json({ error: 'Failed to fetch events.' });
+    const message = process.env.NODE_ENV === 'production'
+      ? 'Failed to fetch events.'
+      : (err.message || 'Failed to fetch events.');
+    res.status(500).json({ error: message });
   }
 });
 
