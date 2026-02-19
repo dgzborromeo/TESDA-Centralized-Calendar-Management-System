@@ -63,7 +63,7 @@ const CLUSTER_LEGEND = [
   {
     id: 'oddg-ai',
     name: 'Office of the Deputy Director-General for Administration and Innovation (ODDG-AI)',
-    color: '#eab308',
+    color: '#06b6d4',
     account: {
       email: (process.env.CLUSTER_ODDG_AI_EMAIL || 'cluster.oddg.ai@tesda.gov.ph').toLowerCase(),
       role: 'user',
@@ -72,7 +72,7 @@ const CLUSTER_LEGEND = [
     offices: [
       {
         name: 'Administrative Service (AS)',
-        color: '#eab308',
+        color: '#06b6d4',
         divisions: [
           'Human Resource Management Division (HRMD)',
           'Procurement Division (PD)',
@@ -81,7 +81,7 @@ const CLUSTER_LEGEND = [
       },
       {
         name: 'Information and Communication Technology Office (ICTO)',
-        color: '#eab308',
+        color: '#06b6d4',
         divisions: [
           'IT Operations Division (ITOD)',
           'IT Planning and Management Division (ITPMD)',

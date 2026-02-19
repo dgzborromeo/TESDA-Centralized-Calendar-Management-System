@@ -2,16 +2,15 @@
  * TESDA Calendar System - API Server
  * Express + MySQL + JWT auth
  */
-require('dotenv').config();
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '.env') });
 const express = require('express');
 const cors = require('cors');
-const path = require('path');
 
 const authRoutes = require('./routes/auth');
 const eventsRoutes = require('./routes/events');
 const usersRoutes = require('./routes/users');
 const invitationsRoutes = require('./routes/invitations');
-const apiRoutes = require('./routes/api');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -26,7 +25,6 @@ app.use('/api/users', usersRoutes);
 app.use('/api/invitations', invitationsRoutes);
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
-app.use('/api', apiRoutes);
 
 app.use((err, req, res, next) => {
   console.error(err);
