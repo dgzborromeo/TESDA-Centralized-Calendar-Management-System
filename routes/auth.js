@@ -7,6 +7,8 @@ const jwt = require('jsonwebtoken');
 const db = require('../config/db');
 const { auth } = require('../middleware/auth');
 const { resolveUserNameConfig } = require('../utils/userName');
+const crypto = require('crypto'); // Built-in sa Node
+const { sendVerificationEmail } = require('../utils/mailer');
 
 const router = express.Router();
 
@@ -25,6 +27,7 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ error: 'Email already registered.' });
     }
     const hashedPassword = await bcrypt.hash(password, 10);
+    const verificationToken = crypto.randomBytes(32).toString('hex');
 
     const cfg = await resolveUserNameConfig(db);
     if (!cfg.insertColumn) {
@@ -32,12 +35,12 @@ router.post('/register', async (req, res) => {
     }
 
     const [result] = await db.query(
-      `INSERT INTO users (${cfg.insertColumn}, email, password, role) VALUES (?, ?, ?, ?)`,
-      [name, email, hashedPassword, 'user']
+      `INSERT INTO users (${cfg.insertColumn}, email, password, role, verification_token) VALUES (?, ?, ?, ?, ?)`,
+      [name, email, hashedPassword, 'user', verificationToken]
     );
-
+    sendVerificationEmail(email, verificationToken).catch(err => console.error("Email Error:", err));
     const [users] = await db.query(
-      `SELECT id, ${cfg.selectExpr('users')} AS name, email, role, created_at FROM users WHERE id = ?`,
+      `SELECT id, ${cfg.selectExpr('users')} AS name, email, role, email_verified_at, created_at FROM users WHERE id = ?`,
       [result.insertId]
     );
     const user = users[0];
@@ -53,6 +56,49 @@ router.post('/register', async (req, res) => {
   }
 });
 
+// backend/routes/auth.js
+router.get('/verify-email', async (req, res) => {
+  const { token } = req.query;
+  console.log("🔍 Verification Attempt for Token:", token);
+
+  try {
+    const [users] = await db.query('SELECT id FROM users WHERE verification_token = ?', [token]);
+    
+    if (users.length === 0) {
+      console.log("❌ Token Mismatch");
+      return res.status(400).json({ error: 'Invalid token.' });
+    }
+
+    // UPDATE LOGIC
+    await db.query(
+      'UPDATE users SET email_verified_at = NOW(), verification_token = NULL WHERE id = ?',
+      [users[0].id]
+    );
+
+    console.log(`🚀 Database Updated for User ID: ${users[0].id}`);
+    res.json({ message: 'Verified!' });
+  } catch (err) {
+    console.error("❌ SQL Error:", err);
+    res.status(500).json({ error: 'Server Error' });
+  }
+});
+
+// POST /api/auth/resend-verification (Protected)
+router.post('/resend-verification', auth, async (req, res) => {
+  try {
+    const [users] = await db.query('SELECT email, email_verified_at FROM users WHERE id = ?', [req.user.id]);
+    if (users[0].email_verified_at) return res.status(400).json({ error: 'Email already verified.' });
+
+    const newToken = crypto.randomBytes(32).toString('hex');
+    await db.query('UPDATE users SET verification_token = ? WHERE id = ?', [newToken, req.user.id]);
+    
+    await sendVerificationEmail(users[0].email, newToken);
+    res.json({ message: 'New verification link sent.' });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to resend email.' });
+  }
+});
+
 // POST /api/auth/login
 router.post('/login', async (req, res) => {
   try {
@@ -62,7 +108,7 @@ router.post('/login', async (req, res) => {
     }
     const cfg = await resolveUserNameConfig(db);
     const [users] = await db.query(
-      `SELECT id, ${cfg.selectExpr('users')} AS name, email, password, role, created_at FROM users WHERE email = ?`,
+      `SELECT id, ${cfg.selectExpr('users')} AS name, email, password, role, email_verified_at, created_at FROM users WHERE email = ?`,
       [email]
     );
     if (users.length === 0) {
@@ -92,18 +138,45 @@ router.post('/login', async (req, res) => {
 });
 
 // GET /api/auth/me - current user (protected)
+// router.get('/me', auth, async (req, res) => {
+//   try {
+//     const cfg = await resolveUserNameConfig(db);
+//     const [users] = await db.query(
+//       `SELECT id, ${cfg.selectExpr('users')} AS name, email, role, email_verified_at, created_at FROM users WHERE id = ?`,
+//       [req.user.id]
+//     );
+//     if (users.length === 0) {
+//       return res.status(404).json({ error: 'User not found.' });
+//     }
+//     res.json(users[0]);
+//   } catch (err) {
+//     res.status(500).json({ error: 'Failed to fetch user.' });
+//   }
+// });
+// GET /api/auth/me
 router.get('/me', auth, async (req, res) => {
   try {
     const cfg = await resolveUserNameConfig(db);
     const [users] = await db.query(
-      `SELECT id, ${cfg.selectExpr('users')} AS name, email, role, created_at FROM users WHERE id = ?`,
+      `SELECT u.id, ${cfg.selectExpr('u')} AS name, u.email, u.role, u.email_verified_at, 
+       EXISTS(
+         SELECT 1 FROM user_profiles p 
+         WHERE p.user_id = u.id 
+           AND p.first_name > '' 
+           AND p.last_name > ''
+           AND p.designation > ''   
+           AND p.region > ''
+       ) AS isProfileComplete 
+       FROM users u WHERE u.id = ?`,
       [req.user.id]
     );
-    if (users.length === 0) {
-      return res.status(404).json({ error: 'User not found.' });
-    }
-    res.json(users[0]);
+    if (users.length === 0) return res.status(404).json({ error: 'User not found.' });
+    const user = users[0];
+    user.isProfileComplete = Boolean(user.isProfileComplete);
+    res.json(user);
   } catch (err) {
+    // Para makita mo ang actual error sa terminal kung sakaling may maling column name pa
+    console.error("SQL Error in /me:", err);
     res.status(500).json({ error: 'Failed to fetch user.' });
   }
 });

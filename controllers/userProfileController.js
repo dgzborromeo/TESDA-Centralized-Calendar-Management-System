@@ -13,7 +13,7 @@ const userProfileController = {
         include: [{ 
           model: User, 
           as: 'user', 
-          attributes: ['email', 'role', 'created_at'] 
+          attributes: ['email', 'role', 'created_at', 'email_verified_at'] 
         }]
       });
 
