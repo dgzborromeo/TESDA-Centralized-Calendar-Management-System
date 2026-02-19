@@ -8,7 +8,8 @@
     "dev": "node --watch server.js",
     "seed:clusters": "node scripts/seed-cluster-users.js",
     "migrate:end-date": "node scripts/migrate-add-end-date.js",
-    "migrate:attachments": "node scripts/migrate-event-attachments.js"
+    "migrate:attachments": "node scripts/migrate-event-attachments.js",
+    "migrate:event-status": "node scripts/migrate-event-status-and-links.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
@@ -17,9 +18,6 @@
     "express": "^4.18.2",
     "jsonwebtoken": "^9.0.2",
     "multer": "^2.0.2",
-    "mysql2": "^3.17.1",
-    "qrcode": "^1.5.4",
-    "sequelize": "^6.37.7",
-    "sequelize-cli": "^6.6.5"
+    "mysql2": "^3.6.5"
   }
 }

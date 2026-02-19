@@ -106,6 +106,34 @@ function attachmentPublicPath(fileName) {
   return `/uploads/events/${encodeURIComponent(fileName)}`;
 }
 
+function requiredPostDocumentLabel(eventType) {
+  const t = String(eventType || '').toLowerCase();
+  if (t === 'meeting' || t === 'zoom') return 'Minutes of the Meeting';
+  return 'After Activity Report (AAR)';
+}
+
+function encodePostDocumentName(originalName, eventType) {
+  const label = requiredPostDocumentLabel(eventType);
+  return `[POSTDOC:${label}] ${String(originalName || '').trim()}`;
+}
+
+function parsePostDocumentName(name) {
+  const raw = String(name || '');
+  const m = raw.match(/^\[POSTDOC:([^\]]+)\]\s*(.*)$/i);
+  if (!m) {
+    return {
+      isPostDocument: false,
+      label: '',
+      displayName: raw,
+    };
+  }
+  return {
+    isPostDocument: true,
+    label: String(m[1] || '').trim(),
+    displayName: String(m[2] || '').trim() || raw,
+  };
+}
+
 async function getParticipantConflicts({ date, startTime, endTime, participantIds, excludeEventId = null }) {
   const ids = Array.from(new Set((participantIds || []).map((n) => parseInt(n, 10)).filter((n) => Number.isFinite(n))));
   if (!ids.length) return [];
@@ -133,6 +161,7 @@ async function getParticipantConflicts({ date, startTime, endTime, participantId
       AND COALESCE(e.end_date, e.date) >= ?
       AND e.start_time < ?
       AND e.end_time > ?
+      AND COALESCE(e.status, 'active') = 'active'
       AND (
         e.created_by IN (${idPlaceholders})
         OR EXISTS (
@@ -160,12 +189,21 @@ router.get('/', async (req, res) => {
     const cfg = await resolveUserNameConfig(db);
     let sql = `
       SELECT e.*, ${cfg.selectExpr('u')} AS creator_name,
+        rs.date AS rescheduled_to_date,
+        rs.end_date AS rescheduled_to_end_date,
+        rs.title AS rescheduled_to_title,
         (SELECT COUNT(*) FROM conflicts c WHERE c.event_id = e.id) AS conflict_count,
         (
           SELECT COUNT(*)
           FROM event_attachments a
           WHERE a.event_id = e.id
         ) AS attachment_count,
+        (
+          SELECT COUNT(*)
+          FROM event_attachments a
+          WHERE a.event_id = e.id
+            AND a.original_name LIKE '[POSTDOC:%'
+        ) AS post_document_count,
         (
           SELECT GROUP_CONCAT(DISTINCT ${cfg.selectExpr('u2')} ORDER BY ${cfg.selectExpr('u2')} SEPARATOR ', ')
           FROM event_attendees ea
@@ -174,6 +212,7 @@ router.get('/', async (req, res) => {
         ) AS participants_summary
       FROM events e
       LEFT JOIN users u ON u.id = e.created_by
+      LEFT JOIN events rs ON rs.id = e.rescheduled_to_event_id
       WHERE 1=1
     `;
     const params = [];
@@ -198,6 +237,8 @@ router.get('/', async (req, res) => {
         ...e,
         date: toYMD(e.date),
         end_date: e.end_date ? toYMD(e.end_date) : null,
+        rescheduled_to_date: e.rescheduled_to_date ? toYMD(e.rescheduled_to_date) : null,
+        rescheduled_to_end_date: e.rescheduled_to_end_date ? toYMD(e.rescheduled_to_end_date) : null,
       }))
     );
   } catch (err) {
@@ -251,6 +292,8 @@ router.get('/conflicts/list', async (req, res) => {
       FROM conflicts c
       JOIN events e1 ON e1.id = c.event_id
       JOIN events e2 ON e2.id = c.conflicting_event_id
+      WHERE COALESCE(e1.status, 'active') = 'active'
+        AND COALESCE(e2.status, 'active') = 'active'
       ORDER BY e1.date DESC, e1.start_time DESC
     `;
     const [rows] = await db.query(sql);
@@ -315,10 +358,51 @@ router.get('/:id', async (req, res) => {
       `,
       [req.params.id]
     );
-    event.attachments = attachments.map((a) => ({
-      ...a,
-      url: attachmentPublicPath(a.file_name),
-    }));
+    event.attachments = attachments.map((a) => {
+      const postMeta = parsePostDocumentName(a.original_name);
+      return {
+        ...a,
+        original_name: postMeta.displayName,
+        is_post_document: postMeta.isPostDocument,
+        post_document_label: postMeta.label || null,
+        url: attachmentPublicPath(a.file_name),
+      };
+    });
+    const postDocCount = event.attachments.filter((a) => a.is_post_document).length;
+    event.post_document_count = postDocCount;
+    event.required_post_document = requiredPostDocumentLabel(event.type);
+    event.post_document_required = isEventDoneRecord(event);
+    event.post_document_missing = event.post_document_required && postDocCount === 0;
+    if (event.rescheduled_to_event_id) {
+      const [nextRows] = await db.query(
+        'SELECT id, title, date, end_date, start_time, end_time, status FROM events WHERE id = ? LIMIT 1',
+        [event.rescheduled_to_event_id]
+      );
+      event.rescheduled_to_event = nextRows[0]
+        ? {
+            ...nextRows[0],
+            date: toYMD(nextRows[0].date),
+            end_date: nextRows[0].end_date ? toYMD(nextRows[0].end_date) : null,
+          }
+        : null;
+    } else {
+      event.rescheduled_to_event = null;
+    }
+    if (event.rescheduled_from_event_id) {
+      const [prevRows] = await db.query(
+        'SELECT id, title, date, end_date, start_time, end_time, status FROM events WHERE id = ? LIMIT 1',
+        [event.rescheduled_from_event_id]
+      );
+      event.rescheduled_from_event = prevRows[0]
+        ? {
+            ...prevRows[0],
+            date: toYMD(prevRows[0].date),
+            end_date: prevRows[0].end_date ? toYMD(prevRows[0].end_date) : null,
+          }
+        : null;
+    } else {
+      event.rescheduled_from_event = null;
+    }
     const conflicts = await getConflictsForEvent(req.params.id);
     event.conflicts = conflicts;
     res.json(event);
@@ -505,6 +589,217 @@ router.post('/', upload.single('attachment'), async (req, res) => {
   }
 });
 
+// POST /api/events/:id/cancel - admin can cancel or cancel+reschedule
+router.post('/:id/cancel', requireAdmin, async (req, res) => {
+  const conn = await db.getConnection();
+  try {
+    const eventId = parseInt(req.params.id, 10);
+    if (!Number.isFinite(eventId)) return res.status(400).json({ error: 'Invalid event id.' });
+
+    const mode = String(req.body?.mode || 'cancel').toLowerCase();
+    const reason = String(req.body?.reason || '').trim() || null;
+    const newDate = req.body?.new_date ? toYMD(req.body.new_date) : null;
+    const newEndDateRaw = req.body?.new_end_date ? toYMD(req.body.new_end_date) : null;
+    const newStartTime = String(req.body?.start_time || '').trim() || null;
+    const newEndTime = String(req.body?.end_time || '').trim() || null;
+
+    if (mode !== 'cancel' && mode !== 'reschedule') {
+      return res.status(400).json({ error: 'Invalid mode. Use cancel or reschedule.' });
+    }
+
+    await conn.beginTransaction();
+    const [rows] = await conn.query('SELECT * FROM events WHERE id = ? FOR UPDATE', [eventId]);
+    if (rows.length === 0) {
+      await conn.rollback();
+      return res.status(404).json({ error: 'Event not found.' });
+    }
+    const source = rows[0];
+    if (String(source.status || 'active') === 'cancelled') {
+      await conn.rollback();
+      return res.status(400).json({ error: 'This event is already cancelled.' });
+    }
+
+    let newEvent = null;
+    if (mode === 'reschedule') {
+      if (!newDate) {
+        await conn.rollback();
+        return res.status(400).json({ error: 'New date is required for rescheduling.' });
+      }
+      const sourceDate = toYMD(source.date);
+      const sourceEndDate = toYMD(source.end_date) || sourceDate;
+      const sourceSpan = datesInRange(sourceDate, sourceEndDate);
+      const spanDays = Math.max(1, sourceSpan.length);
+      const dateList = [newDate];
+      let normalizedNewEnd = null;
+      if (newEndDateRaw) {
+        if (newEndDateRaw < newDate) {
+          await conn.rollback();
+          return res.status(400).json({ error: 'New end date must be the same as or after new date.' });
+        }
+        normalizedNewEnd = newEndDateRaw > newDate ? newEndDateRaw : null;
+        dateList.splice(0, dateList.length, ...datesInRange(newDate, normalizedNewEnd || newDate));
+      } else if (spanDays > 1) {
+        const shiftedEnd = new Date(`${newDate}T12:00:00`);
+        shiftedEnd.setDate(shiftedEnd.getDate() + spanDays - 1);
+        normalizedNewEnd = toYMD(shiftedEnd);
+        dateList.splice(0, dateList.length, ...datesInRange(newDate, normalizedNewEnd));
+      }
+
+      if (!dateList.length) {
+        await conn.rollback();
+        return res.status(400).json({ error: 'Invalid reschedule date range.' });
+      }
+      if (dateList.some((d) => isWeekendYMD(d))) {
+        await conn.rollback();
+        return res.status(400).json({ error: 'Weekends are locked. Please use weekdays only in the selected date range.' });
+      }
+
+      const finalStartTime = newStartTime || source.start_time;
+      const finalEndTime = newEndTime || source.end_time;
+      if (new Date(`1970-01-01T${finalEndTime}`) <= new Date(`1970-01-01T${finalStartTime}`)) {
+        await conn.rollback();
+        return res.status(400).json({ error: 'End time must be after start time.' });
+      }
+
+      const [attRows] = await conn.query('SELECT user_id FROM event_attendees WHERE event_id = ?', [eventId]);
+      const attendeeIds = attRows.map((r) => parseInt(r.user_id, 10)).filter((n) => Number.isFinite(n));
+      const participantIds = [source.created_by, ...attendeeIds];
+      const conflictRows = [];
+      for (const d of dateList) {
+        const conflicts = await getParticipantConflicts({
+          date: d,
+          startTime: finalStartTime,
+          endTime: finalEndTime,
+          participantIds,
+          excludeEventId: eventId,
+        });
+        if (conflicts.length > 0) {
+          conflictRows.push(
+            ...conflicts.map((c) => ({
+              id: c.id,
+              title: c.title,
+              date: toYMD(c.date) || d,
+              start_time: c.start_time,
+              end_time: c.end_time,
+              overlapping_participants: c.overlapping_participants || '',
+            }))
+          );
+        }
+      }
+      if (conflictRows.length > 0) {
+        await conn.rollback();
+        return res.status(409).json({
+          error: 'Selected participant(s) have overlapping schedule in this time slot.',
+          conflicts: conflictRows,
+        });
+      }
+
+      const [inserted] = await conn.query(
+        `INSERT INTO events (
+          title, type, date, end_date, start_time, end_time, location, description, color, created_by, status, rescheduled_from_event_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
+        [
+          source.title,
+          source.type,
+          newDate,
+          normalizedNewEnd,
+          finalStartTime,
+          finalEndTime,
+          source.location || null,
+          source.description || null,
+          source.color || null,
+          source.created_by,
+          eventId,
+        ]
+      );
+      const newEventId = inserted.insertId;
+      for (const uid of attendeeIds) {
+        await conn.query('INSERT IGNORE INTO event_attendees (event_id, user_id) VALUES (?, ?)', [newEventId, uid]);
+        await conn.query(
+          `INSERT IGNORE INTO event_rsvps (event_id, office_user_id, status) VALUES (?, ?, 'pending')`,
+          [newEventId, uid]
+        );
+      }
+      await conn.query(
+        `UPDATE events
+         SET status='cancelled', cancel_reason=?, canceled_at=NOW(), canceled_by=?, rescheduled_to_event_id=?, updated_at=NOW()
+         WHERE id=?`,
+        [reason, req.user.id, newEventId, eventId]
+      );
+
+      const cfg = await resolveUserNameConfig(db);
+      const [createdRows] = await conn.query(
+        `SELECT e.*, ${cfg.selectExpr('u')} AS creator_name
+         FROM events e
+         LEFT JOIN users u ON u.id = e.created_by
+         WHERE e.id = ?`,
+        [newEventId]
+      );
+      newEvent = createdRows[0]
+        ? {
+            ...createdRows[0],
+            date: toYMD(createdRows[0].date),
+            end_date: createdRows[0].end_date ? toYMD(createdRows[0].end_date) : null,
+          }
+        : null;
+    } else {
+      await conn.query(
+        `UPDATE events
+         SET status='cancelled', cancel_reason=?, canceled_at=NOW(), canceled_by=?, updated_at=NOW()
+         WHERE id=?`,
+        [reason, req.user.id, eventId]
+      );
+    }
+
+    await conn.commit();
+    res.json({
+      success: true,
+      mode,
+      canceled_event_id: eventId,
+      rescheduled_event: newEvent,
+    });
+  } catch (err) {
+    await conn.rollback();
+    console.error('Cancel event:', err);
+    res.status(500).json({ error: 'Failed to cancel event.' });
+  } finally {
+    conn.release();
+  }
+});
+
+// POST /api/events/:id/post-document - host uploads AAR/Minutes for done events
+router.post('/:id/post-document', upload.single('attachment'), async (req, res) => {
+  try {
+    const eventId = parseInt(req.params.id, 10);
+    if (!Number.isFinite(eventId)) return res.status(400).json({ error: 'Invalid event id.' });
+    if (!req.file) return res.status(400).json({ error: 'Attachment file is required.' });
+
+    const [rows] = await db.query('SELECT * FROM events WHERE id = ?', [eventId]);
+    if (rows.length === 0) return res.status(404).json({ error: 'Event not found.' });
+    const event = rows[0];
+    if (String(event.status || 'active') === 'cancelled') {
+      return res.status(400).json({ error: 'Cannot upload post-event document for a cancelled event.' });
+    }
+    if (Number(event.created_by) !== Number(req.user.id)) {
+      return res.status(403).json({ error: 'Only the event host can upload this required document.' });
+    }
+    if (!isEventDoneRecord(event)) {
+      return res.status(400).json({ error: 'Post-event document can only be uploaded once the event is done.' });
+    }
+
+    const taggedOriginalName = encodePostDocumentName(req.file.originalname, event.type);
+    await db.query(
+      `INSERT INTO event_attachments (event_id, file_name, original_name, mime_type, size_bytes)
+       VALUES (?, ?, ?, ?, ?)`,
+      [eventId, req.file.filename, taggedOriginalName, req.file.mimetype || null, req.file.size || 0]
+    );
+    res.status(201).json({ success: true, required_post_document: requiredPostDocumentLabel(event.type) });
+  } catch (err) {
+    console.error('Upload post-document:', err);
+    res.status(500).json({ error: 'Failed to upload post-event document.' });
+  }
+});
+
 // PUT /api/events/:id - update
 router.put('/:id', async (req, res) => {
   try {
@@ -518,6 +813,9 @@ router.put('/:id', async (req, res) => {
     const [events] = await db.query('SELECT * FROM events WHERE id = ?', [req.params.id]);
     if (events.length === 0) return res.status(404).json({ error: 'Event not found.' });
     if (!canModify(req, events[0])) return res.status(403).json({ error: 'Access denied.' });
+    if (String(events[0].status || 'active') === 'cancelled') {
+      return res.status(400).json({ error: 'This event is cancelled and is now view-only.' });
+    }
     if (isEventDoneRecord(events[0])) {
       return res.status(400).json({ error: 'This event is already done and is now view-only.' });
     }
