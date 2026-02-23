@@ -75,10 +75,8 @@ router.get('/legend/clusters', async (req, res) => {
   }
 });
 
-// All routes below this line require auth
-router.use(auth);
-
-// GET /api/users - list users (for dropdowns); admin sees all, user sees all (for attendees)
+// GET /api/users - list users (for dropdowns, attendees, host mapping)
+// Public read-only so calendar host/office views work for guests.
 router.get('/', async (req, res) => {
   try {
     const cfg = await resolveUserNameConfig(db);
@@ -91,8 +89,8 @@ router.get('/', async (req, res) => {
   }
 });
 
-// GET /api/users/:id - single user (admin or self)
-router.get('/:id', async (req, res) => {
+// GET /api/users/:id - single user (admin or self) - requires auth
+router.get('/:id', auth, async (req, res) => {
   if (req.user.role !== 'admin' && parseInt(req.params.id, 10) !== req.user.id) {
     return res.status(403).json({ error: 'Access denied.' });
   }
