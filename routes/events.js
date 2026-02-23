@@ -38,8 +38,7 @@ const upload = multer({
   },
 });
 
-// All routes require auth
-router.use(auth);
+// Most routes require auth; read-only endpoints are kept public below where needed.
 
 // Helper: can user modify this event?
 function canModify(req, event) {
@@ -413,6 +412,9 @@ router.get('/:id', async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch event.' });
   }
 });
+
+// All routes below this line require authentication
+router.use(auth);
 
 // POST /api/events/:id/rsvp - invited office responds
 router.post('/:id/rsvp', async (req, res) => {

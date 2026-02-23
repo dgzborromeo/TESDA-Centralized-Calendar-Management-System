@@ -10,7 +10,8 @@ const { CLUSTER_LEGEND } = require('../utils/clusterLegend');
 
 const router = express.Router();
 
-router.use(auth);
+// Legend endpoints are public so calendar/office directory work for guests.
+// Other user endpoints below this line require authentication.
 
 // GET /api/users/legend - list offices with assigned colors (for Calendar legend)
 router.get('/legend', async (req, res) => {
@@ -73,6 +74,9 @@ router.get('/legend/clusters', async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch cluster legend.' });
   }
 });
+
+// All routes below this line require auth
+router.use(auth);
 
 // GET /api/users - list users (for dropdowns); admin sees all, user sees all (for attendees)
 router.get('/', async (req, res) => {
