@@ -11,6 +11,13 @@ const { auth, requireAdmin } = require('../middleware/auth');
 const { getConflictsForEvent } = require('../utils/conflictDetection');
 const { resolveUserNameConfig } = require('../utils/userName');
 const { toYMD } = require('../utils/dateCoerce');
+
+/** True if ymd (YYYY-MM-DD) is in February of the current year (allows filling February with events). */
+function isFebruaryOfCurrentYear(ymd) {
+  const s = String(ymd || '').slice(0, 10);
+  const year = new Date().getFullYear();
+  return s >= `${year}-02-01` && s <= `${year}-02-29`;
+}
 const {
   isRomoUser, isOsecUser, isPoUser, isSmoUser, isCoUser, isIctoUser, isAsUser, isPloUser,
   isPioUser, isQsoUser, isFmsUser, isClgeoUser, isEbetoUser,
@@ -141,6 +148,21 @@ async function getParticipantConflicts({ date, startTime, endTime, participantId
   let sql = `
     SELECT DISTINCT
       e.id, e.title, e.date, e.end_date, e.start_time, e.end_time,
+      e.created_by AS conflict_event_created_by,
+      (
+        SELECT GROUP_CONCAT(DISTINCT u.id ORDER BY u.id SEPARATOR ',')
+        FROM users u
+        WHERE u.id IN (${idPlaceholders})
+          AND (
+            u.id = e.created_by
+            OR EXISTS (
+              SELECT 1
+              FROM event_attendees ea2
+              WHERE ea2.event_id = e.id
+                AND ea2.user_id = u.id
+            )
+          )
+      ) AS overlapping_participant_ids,
       (
         SELECT GROUP_CONCAT(DISTINCT u.name ORDER BY u.name SEPARATOR ', ')
         FROM users u
@@ -171,7 +193,7 @@ async function getParticipantConflicts({ date, startTime, endTime, participantId
         )
       )
   `;
-  const params = [...ids, date, date, endTime, startTime, ...ids, ...ids];
+  const params = [...ids, ...ids, date, date, endTime, startTime, ...ids, ...ids];
   if (excludeEventId) {
     sql += ' AND e.id != ?';
     params.push(excludeEventId);
@@ -501,7 +523,7 @@ router.post('/', upload.single('attachment'), async (req, res) => {
     if (endDate < startDate) {
       return res.status(400).json({ error: 'End date must be the same as or after start date.' });
     }
-    if (startDate < todayYmd) {
+    if (startDate < todayYmd && !isFebruaryOfCurrentYear(startDate)) {
       return res.status(400).json({ error: 'Past dates are view-only. Please select today or a future date.' });
     }
     const dateList = datesInRange(startDate, endDate);
@@ -514,36 +536,6 @@ router.post('/', upload.single('attachment'), async (req, res) => {
     }
     if (new Date(`1970-01-01T${end_time}`) <= new Date(`1970-01-01T${start_time}`)) {
       return res.status(400).json({ error: 'End time must be after start time.' });
-    }
-
-    // Participant conflict only (time overlap is allowed if participants don't overlap).
-    const participantIds = [req.user.id, ...attendee_ids];
-    const conflictsByDate = [];
-    for (const d of dateList) {
-      const conflicts = await getParticipantConflicts({
-        date: d,
-        startTime: start_time,
-        endTime: end_time,
-        participantIds,
-      });
-      if (conflicts.length > 0) {
-        conflictsByDate.push(
-          ...conflicts.map((c) => ({
-            id: c.id,
-            title: c.title,
-            date: toYMD(c.date) || d,
-            start_time: c.start_time,
-            end_time: c.end_time,
-            overlapping_participants: c.overlapping_participants || '',
-          }))
-        );
-      }
-    }
-    if (conflictsByDate.length > 0) {
-      return res.status(409).json({
-        error: 'Selected participant(s) have overlapping schedule in this time slot.',
-        conflicts: conflictsByDate,
-      });
     }
 
     const finalColor = assignedOfficeColor(req.user);
@@ -669,39 +661,6 @@ router.post('/:id/cancel', requireAdmin, async (req, res) => {
       if (new Date(`1970-01-01T${finalEndTime}`) <= new Date(`1970-01-01T${finalStartTime}`)) {
         await conn.rollback();
         return res.status(400).json({ error: 'End time must be after start time.' });
-      }
-
-      const [attRows] = await conn.query('SELECT user_id FROM event_attendees WHERE event_id = ?', [eventId]);
-      const attendeeIds = attRows.map((r) => parseInt(r.user_id, 10)).filter((n) => Number.isFinite(n));
-      const participantIds = [source.created_by, ...attendeeIds];
-      const conflictRows = [];
-      for (const d of dateList) {
-        const conflicts = await getParticipantConflicts({
-          date: d,
-          startTime: finalStartTime,
-          endTime: finalEndTime,
-          participantIds,
-          excludeEventId: eventId,
-        });
-        if (conflicts.length > 0) {
-          conflictRows.push(
-            ...conflicts.map((c) => ({
-              id: c.id,
-              title: c.title,
-              date: toYMD(c.date) || d,
-              start_time: c.start_time,
-              end_time: c.end_time,
-              overlapping_participants: c.overlapping_participants || '',
-            }))
-          );
-        }
-      }
-      if (conflictRows.length > 0) {
-        await conn.rollback();
-        return res.status(409).json({
-          error: 'Selected participant(s) have overlapping schedule in this time slot.',
-          conflicts: conflictRows,
-        });
       }
 
       const [inserted] = await conn.query(
@@ -863,7 +822,6 @@ router.put('/:id', async (req, res) => {
     if (new Date(`1970-01-01T${newEnd}`) <= new Date(`1970-01-01T${newStart}`)) {
       return res.status(400).json({ error: 'End time must be after start time.' });
     }
-    // Participant conflict only (time overlap is allowed if participants don't overlap).
     let nextAttendeeIds = [];
     if (attendee_ids !== undefined && Array.isArray(attendee_ids)) {
       nextAttendeeIds = attendee_ids
@@ -872,33 +830,6 @@ router.put('/:id', async (req, res) => {
     } else {
       const [existingAttendees] = await db.query('SELECT user_id FROM event_attendees WHERE event_id = ?', [req.params.id]);
       nextAttendeeIds = existingAttendees.map((r) => r.user_id);
-    }
-    const participantIds = [e.created_by, ...nextAttendeeIds];
-    const conflictRows = [];
-    for (const d of dateList) {
-      const conflicts = await getParticipantConflicts({
-        date: d,
-        startTime: newStart,
-        endTime: newEnd,
-        participantIds,
-        excludeEventId: parseInt(req.params.id, 10),
-      });
-      if (conflicts.length > 0) {
-        conflictRows.push(...conflicts.map((c) => ({ ...c, date: c.date ? toYMD(c.date) : d })));
-      }
-    }
-    if (conflictRows.length > 0) {
-      return res.status(409).json({
-        error: 'Selected participant(s) have overlapping schedule in this time slot.',
-        conflicts: conflictRows.map((c) => ({
-          id: c.id,
-          title: c.title,
-          date: c.date,
-          start_time: c.start_time,
-          end_time: c.end_time,
-          overlapping_participants: c.overlapping_participants || '',
-        })),
-      });
     }
     await db.query(
       `UPDATE events SET title=?, type=?, date=?, end_date=?, start_time=?, end_time=?, location=?, description=?, color=?, updated_at=NOW() WHERE id=?`,
