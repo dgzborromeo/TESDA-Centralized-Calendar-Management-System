@@ -208,7 +208,12 @@ router.get('/', async (req, res) => {
           FROM event_attendees ea
           JOIN users u2 ON u2.id = ea.user_id
           WHERE ea.event_id = e.id
-        ) AS participants_summary
+        ) AS participants_summary,
+        (CASE
+          WHEN e.created_by IN (SELECT id FROM users u_osec WHERE LOWER(u_osec.email) IN ('osec@tesda.gov.ph', 'cluster.osec@tesda.gov.ph'))
+            OR EXISTS (SELECT 1 FROM event_attendees ea JOIN users u_att ON u_att.id = ea.user_id WHERE ea.event_id = e.id AND LOWER(u_att.email) IN ('osec@tesda.gov.ph', 'cluster.osec@tesda.gov.ph'))
+          THEN 1 ELSE 0 END
+        ) AS has_osec_participant
       FROM events e
       LEFT JOIN users u ON u.id = e.created_by
       LEFT JOIN events rs ON rs.id = e.rescheduled_to_event_id
