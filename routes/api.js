@@ -34,4 +34,12 @@ router.post('/update-division/:id', auth, configController.updateDivision);
 router.delete('/delete-division/:id', auth, configController.deleteDivision);
 router.get('/get-division/:id', auth, configController.getDivisionById);
 
+//POSITION
+// Positions Master List Endpoints
+router.get('/get-positions', auth, configController.getAllPositions);
+router.post('/add-position', auth, configController.createPosition);
+router.post('/update-position/:id', auth, configController.updatePosition);
+router.delete('/delete-position/:id', auth, configController.deletePosition);
+router.get('/get-position/:id', auth, configController.getPositionById);
+
 module.exports = router;

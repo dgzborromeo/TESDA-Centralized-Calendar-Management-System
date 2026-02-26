@@ -1,4 +1,4 @@
-const { Office, Division } = require('../models');
+const { Office, Division, Position } = require('../models');
 const { Op } = require('sequelize');
 module.exports = {
   // 1. CREATE - Magdagdag ng bagong Office
@@ -252,6 +252,105 @@ async createDivision(req, res) {
       if (!division) return res.status(404).json({ message: 'Division not found.' });
       await division.destroy();
       return res.status(200).json({ message: 'Division deleted successfully.' });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  },
+
+  // CONFIG FOR POSITION
+  // 1. CREATE POSITION (Master List)
+  async createPosition(req, res) {
+    try {
+      const { name } = req.body;
+
+      // STEP 1: Trim the input
+      const cleanName = name ? name.trim() : '';
+
+      if (!cleanName) {
+        return res.status(400).json({ message: 'Position name is required.' });
+      }
+
+      // STEP 2: Check uniqueness (Case-insensitive check sa master list)
+      const existing = await Position.findOne({ 
+        where: { name: cleanName } 
+      });
+
+      if (existing) {
+        return res.status(400).json({ message: 'This position already exists in the master list.' });
+      }
+
+      // STEP 3: Create
+      const position = await Position.create({ 
+        name: cleanName 
+      });
+      
+      return res.status(201).json(position);
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  },
+
+  // 2. GET ALL POSITIONS
+  async getAllPositions(req, res) {
+    try {
+      const positions = await Position.findAll({
+        order: [['name', 'ASC']]
+      });
+      return res.status(200).json(positions);
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  },
+  async getPositionById(req, res) {
+    try {
+      const position = await Position.findByPk(req.params.id);
+
+      if (!position) {
+        return res.status(404).json({ message: 'Position not found.' });
+      }
+
+      return res.status(200).json(position);
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  },
+
+  // 3. UPDATE POSITION
+  async updatePosition(req, res) {
+    try {
+      const { name } = req.body;
+      const cleanName = name ? name.trim() : '';
+
+      const position = await Position.findByPk(req.params.id);
+      if (!position) {
+        return res.status(404).json({ message: 'Position not found.' });
+      }
+
+      // Uniqueness check kung binago ang pangalan
+      if (cleanName && cleanName !== position.name) {
+        const duplicate = await Position.findOne({ where: { name: cleanName } });
+        if (duplicate) {
+          return res.status(400).json({ message: 'Position name already exists.' });
+        }
+      }
+
+      await position.update({ name: cleanName });
+      return res.status(200).json(position);
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  },
+
+  // 4. DELETE POSITION
+  async deletePosition(req, res) {
+    try {
+      const position = await Position.findByPk(req.params.id);
+      if (!position) {
+        return res.status(404).json({ message: 'Position not found.' });
+      }
+
+      await position.destroy();
+      return res.status(200).json({ message: 'Position deleted successfully.' });
     } catch (err) {
       return res.status(500).json({ error: err.message });
     }
