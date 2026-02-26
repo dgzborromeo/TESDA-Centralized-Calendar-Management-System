@@ -42,4 +42,11 @@ router.post('/update-position/:id', auth, configController.updatePosition);
 router.delete('/delete-position/:id', auth, configController.deletePosition);
 router.get('/get-position/:id', auth, configController.getPositionById);
 
+//SETUP POSITIOn
+// Config Positions (Assignments)
+router.get('/get-config-positions', auth, configController.getAllConfigPositions);
+router.post('/setup-position', auth, configController.setupPosition);
+router.post('/update-config-position/:id', auth, configController.updateConfigPosition);
+router.delete('/delete-config-position/:id', auth, configController.deleteConfigPosition);
+router.get('/get-config-position/:id', auth, configController.getConfigPositionById);
 module.exports = router;

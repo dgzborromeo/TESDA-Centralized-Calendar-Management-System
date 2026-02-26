@@ -1,4 +1,4 @@
-const { Office, Division, Position } = require('../models');
+const { ConfigPosition, Office, Division, Position } = require('../models');
 const { Op } = require('sequelize');
 module.exports = {
   // 1. CREATE - Magdagdag ng bagong Office
@@ -351,6 +351,133 @@ async createDivision(req, res) {
 
       await position.destroy();
       return res.status(200).json({ message: 'Position deleted successfully.' });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  },
+
+    async setupPosition(req, res) {
+    try {
+        // Gamit tayo ng 'let' sa office_id dahil babaguhin natin ang value nito sa loob
+        let { office_id, division_id, position_id } = req.body;
+
+        // 1. Basic Validation
+        if (!position_id || (!office_id && !division_id)) {
+        return res.status(400).json({ message: 'Position and either Office or Division are required.' });
+        }
+
+        // 2. AUTO-BIND: Kung may division pero walang office_id, kunin natin ang parent office
+        if (division_id && !office_id) {
+        const div = await Division.findByPk(division_id);
+        if (div) {
+            office_id = div.office_id; 
+        }
+        }
+
+        // 3. CHECK DUPLICATE (Dapat ito ang mauna bago mag-create)
+        const existing = await ConfigPosition.findOne({
+        where: {
+            position_id,
+            office_id: office_id || null,
+            division_id: division_id || null
+        }
+        });
+
+        if (existing) {
+        return res.status(400).json({ message: 'This position is already assigned to this unit.' });
+        }
+
+        // 4. CREATE (Isang beses lang dapat ito)
+        const setup = await ConfigPosition.create({
+        office_id: office_id || null,
+        division_id: division_id || null,
+        position_id
+        });
+
+        // 5. FETCH RESULT WITH ASSOCIATIONS
+        const result = await ConfigPosition.findByPk(setup.id, {
+        include: [
+            { model: Office, as: 'office', attributes: ['name', 'abbr'] },
+            { model: Division, as: 'division', attributes: ['name', 'abbr'] },
+            { model: Position, as: 'position', attributes: ['name'] }
+        ]
+        });
+
+        return res.status(201).json(result);
+    } catch (err) {
+        return res.status(500).json({ error: err.message });
+    }
+    },
+
+  // 2. GET ALL CONFIGURED POSITIONS
+  async getAllConfigPositions(req, res) {
+    try {
+      const configs = await ConfigPosition.findAll({
+        include: [
+          { model: Office, as: 'office', attributes: ['name', 'abbr'] },
+          { model: Division, as: 'division', attributes: ['name', 'abbr'] },
+          { model: Position, as: 'position', attributes: ['name'] }
+        ],
+        order: [['created_at', 'DESC']]
+      });
+      return res.status(200).json(configs);
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  },
+
+  // 3. REMOVE ASSIGNMENT (Delete Config)
+  async deleteConfigPosition(req, res) {
+    try {
+      const config = await ConfigPosition.findByPk(req.params.id);
+      if (!config) return res.status(404).json({ message: 'Configuration not found.' });
+
+      await config.destroy();
+      return res.status(200).json({ message: 'Position assignment removed successfully.' });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  },
+
+  // 5. READ ONE - Kunin ang specific configuration/assignment gamit ang ID
+  async getConfigPositionById(req, res) {
+    try {
+      const config = await ConfigPosition.findByPk(req.params.id, {
+        include: [
+          { model: Office, as: 'office', attributes: ['id', 'name', 'abbr'] },
+          { model: Division, as: 'division', attributes: ['id', 'name', 'abbr'] },
+          { model: Position, as: 'position', attributes: ['id', 'name'] }
+        ]
+      });
+
+      if (!config) {
+        return res.status(404).json({ message: 'Configuration assignment not found.' });
+      }
+
+      return res.status(200).json(config);
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  },
+
+  // Note: Usually, sa config table na ganito, 'Delete' at 'Add' lang (Setup/Remove) 
+  // ang common dahil 3 IDs lang naman ang laman. Pero kung kailangan ng Update:
+  async updateConfigPosition(req, res) {
+    try {
+      const { office_id, division_id, position_id } = req.body;
+      const config = await ConfigPosition.findByPk(req.params.id);
+      if (!config) return res.status(404).json({ message: 'Config not found.' });
+
+      await config.update({
+        office_id: office_id || null,
+        division_id: division_id || null,
+        position_id
+      });
+
+      const updated = await ConfigPosition.findByPk(config.id, {
+        include: ['office', 'division', 'position']
+      });
+      return res.status(200).json(updated);
     } catch (err) {
       return res.status(500).json({ error: err.message });
     }
