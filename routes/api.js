@@ -3,6 +3,7 @@ const router = express.Router();
 
 // Import Controllers
 const userProfileController = require('../controllers/userProfileController');
+const configController = require('../controllers/configController');
 
 // Import Middlewares
 const { auth } = require('../middleware/auth');
@@ -18,7 +19,12 @@ router.post('/profile/save', auth, upload.single('picture'), userProfileControll
 
 router.delete('/profile/remove', auth, userProfileController.deleteProfile);
 
-// --- EVENT ROUTES (Soon) ---
-// router.get('/events', eventController.index);
+// -----CONFIGURATIONS API HERE -----
+router.post('/add-office', auth, configController.create);
+router.get('/get-offices', auth, configController.getAll);
+router.get('/get-office/:id', auth, configController.getById);
+router.post('/update-office/:id', auth, configController.update);
+router.delete('/delete-office/:id', auth, configController.delete);
+
 
 module.exports = router;
