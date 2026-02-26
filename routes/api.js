@@ -20,11 +20,18 @@ router.post('/profile/save', auth, upload.single('picture'), userProfileControll
 router.delete('/profile/remove', auth, userProfileController.deleteProfile);
 
 // -----CONFIGURATIONS API HERE -----
+// OFFICE
 router.post('/add-office', auth, configController.create);
 router.get('/get-offices', auth, configController.getAll);
 router.get('/get-office/:id', auth, configController.getById);
 router.post('/update-office/:id', auth, configController.update);
 router.delete('/delete-office/:id', auth, configController.delete);
 
+// DIVISION
+router.get('/get-divisions', auth, configController.getAllDivisions);
+router.post('/add-division', auth, configController.createDivision);
+router.post('/update-division/:id', auth, configController.updateDivision);
+router.delete('/delete-division/:id', auth, configController.deleteDivision);
+router.get('/get-division/:id', auth, configController.getDivisionById);
 
 module.exports = router;

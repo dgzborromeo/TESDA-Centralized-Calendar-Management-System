@@ -31,7 +31,8 @@ module.exports = (sequelize, DataTypes) => {
     modelName: 'Division',
     tableName: 'divisions', // Tugma sa migration name
     updated_at: false,          // Walang updated_at sa migration mo
-    created_at: 'created_at'
+    created_at: 'created_at',
+    underscored: true,
   });
   return Division;
 };

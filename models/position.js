@@ -24,7 +24,8 @@ module.exports = (sequelize, DataTypes) => {
     modelName: 'Position',
     tableName: 'positions', // Tugma sa migration
     updated_at: false,          // Walang updated_at sa migration mo
-    created_at: 'created_at'
+    created_at: 'created_at',
+    underscored: true,
   });
   return Position;
 };
