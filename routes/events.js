@@ -512,7 +512,17 @@ router.post('/:id/rsvp', async (req, res) => {
 // POST /api/events - create with conflict check
 router.post('/', upload.single('attachment'), async (req, res) => {
   try {
-    const { title, type, date, end_date, start_time, end_time, location, description } = req.body || {};
+    const {
+      title,
+      type,
+      date,
+      end_date,
+      start_time,
+      end_time,
+      location,
+      description,
+      regional_directors_label,
+    } = req.body || {};
     const attendee_ids = parseAttendeeIds(req.body?.attendee_ids);
     if (!title || !date || !start_time || !end_time) {
       return res.status(400).json({ error: 'Title, date, start time and end time are required.' });
@@ -541,9 +551,21 @@ router.post('/', upload.single('attachment'), async (req, res) => {
     const finalColor = assignedOfficeColor(req.user);
     const normalizedEndDate = endDate > startDate ? endDate : null;
     const [result] = await db.query(
-      `INSERT INTO events (title, type, date, end_date, start_time, end_time, location, description, color, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [title, type || 'meeting', startDate, normalizedEndDate, start_time, end_time, location || null, description || null, finalColor, req.user.id]
+      `INSERT INTO events (title, type, date, end_date, start_time, end_time, location, description, regional_directors_label, color, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        title,
+        type || 'meeting',
+        startDate,
+        normalizedEndDate,
+        start_time,
+        end_time,
+        location || null,
+        description || null,
+        regional_directors_label || null,
+        finalColor,
+        req.user.id,
+      ]
     );
     const eventId = result.insertId;
     if (attendee_ids && Array.isArray(attendee_ids) && attendee_ids.length > 0) {
@@ -788,7 +810,19 @@ router.put('/:id', async (req, res) => {
     if (isEventDoneRecord(events[0])) {
       return res.status(400).json({ error: 'This event is already done and is now view-only.' });
     }
-    const { title, type, date, end_date, start_time, end_time, location, description, color, attendee_ids } = req.body;
+    const {
+      title,
+      type,
+      date,
+      end_date,
+      start_time,
+      end_time,
+      location,
+      description,
+      color,
+      regional_directors_label,
+      attendee_ids,
+    } = req.body;
     const e = events[0];
     const existingDate = toYMD(e.date);
     const existingEndDate = e.end_date ? toYMD(e.end_date) : existingDate;
@@ -832,8 +866,34 @@ router.put('/:id', async (req, res) => {
       nextAttendeeIds = existingAttendees.map((r) => r.user_id);
     }
     await db.query(
-      `UPDATE events SET title=?, type=?, date=?, end_date=?, start_time=?, end_time=?, location=?, description=?, color=?, updated_at=NOW() WHERE id=?`,
-      [newTitle, newType, newDate, newEndDate, newStart, newEnd, location !== undefined ? location : e.location, description !== undefined ? description : e.description, color !== undefined ? color : e.color, req.params.id]
+      `UPDATE events
+       SET title=?,
+           type=?,
+           date=?,
+           end_date=?,
+           start_time=?,
+           end_time=?,
+           location=?,
+           description=?,
+           regional_directors_label=?,
+           color=?,
+           updated_at=NOW()
+       WHERE id=?`,
+      [
+        newTitle,
+        newType,
+        newDate,
+        newEndDate,
+        newStart,
+        newEnd,
+        location !== undefined ? location : e.location,
+        description !== undefined ? description : e.description,
+        regional_directors_label !== undefined
+          ? regional_directors_label
+          : e.regional_directors_label || null,
+        color !== undefined ? color : e.color,
+        req.params.id,
+      ]
     );
     await db.query('DELETE FROM conflicts WHERE event_id = ? OR conflicting_event_id = ?', [req.params.id, req.params.id]);
     if (attendee_ids !== undefined && Array.isArray(attendee_ids)) {
