@@ -522,6 +522,8 @@ router.post('/', upload.single('attachment'), async (req, res) => {
       location,
       description,
       regional_directors_label,
+      provincial_directors_label,
+      executive_directors_label,
     } = req.body || {};
     const attendee_ids = parseAttendeeIds(req.body?.attendee_ids);
     if (!title || !date || !start_time || !end_time) {
@@ -551,8 +553,8 @@ router.post('/', upload.single('attachment'), async (req, res) => {
     const finalColor = assignedOfficeColor(req.user);
     const normalizedEndDate = endDate > startDate ? endDate : null;
     const [result] = await db.query(
-      `INSERT INTO events (title, type, date, end_date, start_time, end_time, location, description, regional_directors_label, color, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO events (title, type, date, end_date, start_time, end_time, location, description, regional_directors_label, provincial_directors_label, executive_directors_label, color, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         title,
         type || 'meeting',
@@ -563,6 +565,8 @@ router.post('/', upload.single('attachment'), async (req, res) => {
         location || null,
         description || null,
         regional_directors_label || null,
+        provincial_directors_label || null,
+        executive_directors_label || null,
         finalColor,
         req.user.id,
       ]
@@ -821,6 +825,8 @@ router.put('/:id', async (req, res) => {
       description,
       color,
       regional_directors_label,
+      provincial_directors_label,
+      executive_directors_label,
       attendee_ids,
     } = req.body;
     const e = events[0];
@@ -876,6 +882,8 @@ router.put('/:id', async (req, res) => {
            location=?,
            description=?,
            regional_directors_label=?,
+           provincial_directors_label=?,
+           executive_directors_label=?,
            color=?,
            updated_at=NOW()
        WHERE id=?`,
@@ -891,6 +899,12 @@ router.put('/:id', async (req, res) => {
         regional_directors_label !== undefined
           ? regional_directors_label
           : e.regional_directors_label || null,
+        provincial_directors_label !== undefined
+          ? provincial_directors_label
+          : e.provincial_directors_label || null,
+        executive_directors_label !== undefined
+          ? executive_directors_label
+          : e.executive_directors_label || null,
         color !== undefined ? color : e.color,
         req.params.id,
       ]
