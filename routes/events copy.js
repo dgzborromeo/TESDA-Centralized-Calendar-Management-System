@@ -520,7 +520,6 @@ router.post('/', upload.single('attachment'), async (req, res) => {
       start_time,
       end_time,
       location,
-      participants,
       description,
       regional_directors_label,
       provincial_directors_label,
@@ -554,8 +553,8 @@ router.post('/', upload.single('attachment'), async (req, res) => {
     const finalColor = assignedOfficeColor(req.user);
     const normalizedEndDate = endDate > startDate ? endDate : null;
     const [result] = await db.query(
-      `INSERT INTO events (title, type, date, end_date, start_time, end_time, location, participants, description, regional_directors_label, provincial_directors_label, executive_directors_label, color, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO events (title, type, date, end_date, start_time, end_time, location, description, regional_directors_label, provincial_directors_label, executive_directors_label, color, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         title,
         type || 'meeting',
@@ -564,7 +563,6 @@ router.post('/', upload.single('attachment'), async (req, res) => {
         start_time,
         end_time,
         location || null,
-        participants || null,
         description || null,
         regional_directors_label || null,
         provincial_directors_label || null,
@@ -824,7 +822,6 @@ router.put('/:id', async (req, res) => {
       start_time,
       end_time,
       location,
-      participants,
       description,
       color,
       regional_directors_label,
@@ -883,7 +880,6 @@ router.put('/:id', async (req, res) => {
            start_time=?,
            end_time=?,
            location=?,
-           participants=?,
            description=?,
            regional_directors_label=?,
            provincial_directors_label=?,
@@ -899,7 +895,6 @@ router.put('/:id', async (req, res) => {
         newStart,
         newEnd,
         location !== undefined ? location : e.location,
-        participants !== undefined ? location : e.participants,
         description !== undefined ? description : e.description,
         regional_directors_label !== undefined
           ? regional_directors_label

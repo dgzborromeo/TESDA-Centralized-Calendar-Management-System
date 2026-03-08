@@ -49,4 +49,17 @@ router.post('/setup-position', auth, configController.setupPosition);
 router.post('/update-config-position/:id', auth, configController.updateConfigPosition);
 router.delete('/delete-config-position/:id', auth, configController.deleteConfigPosition);
 router.get('/get-config-position/:id', auth, configController.getConfigPositionById);
+
+//Category
+router.post('/category', configController.createCategory);          // POST /api/categories
+router.get('/categories', configController.getAllCategories);           // GET /api/categories
+router.get('/category/:id', configController.getCategoryById);       // GET /api/categories/1
+router.post('/category/:id', configController.updateCategory);        // PUT /api/categories/1
+router.delete('/category/:id', configController.deleteCategory);
+//Focal
+router.post('/focal', configController.createFocal);
+router.get('/focals', configController.getAllFocals);
+router.get('/focal/:id', configController.getFocalById);
+router.post('/focal/:id', configController.updateFocal);
+router.delete('/focal/:id', configController.deleteFocal);
 module.exports = router;

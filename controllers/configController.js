@@ -1,4 +1,4 @@
-const { ConfigPosition, Office, Division, Position } = require('../models');
+const { Category, Focal, ConfigPosition, Office, Division, Position } = require('../models');
 const { Op } = require('sequelize');
 module.exports = {
   // 1. CREATE - Magdagdag ng bagong Office
@@ -481,7 +481,195 @@ async createDivision(req, res) {
     } catch (err) {
       return res.status(500).json({ error: err.message });
     }
+  },
+
+  // Add new category
+  async createCategory(req, res) {
+    try {
+      const { category_name } = req.body;
+
+      // Uniqueness Check
+      const existing = await Category.findOne({ where: { category_name } });
+      if (existing) {
+        return res.status(400).json({ message: 'Category name already exists.' });
+      }
+
+      const newCategory = await Category.create({ 
+        category_name // Siguraduhin na ang field sa DB ay category_name
+      });
+
+      return res.status(201).json(newCategory);
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  },
+
+  // Get all categories with association
+  async getAllCategories(req, res) {
+    try {
+      const categories = await Category.findAll({
+        include: ['focal'],
+        order: [['created_at', 'DESC']]
+      });
+      return res.status(200).json(categories);
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  },
+
+  // Get single category
+  async getCategoryById(req, res) {
+    try {
+      const category = await Category.findByPk(req.params.id, {
+        include: ['focal']
+      });
+      if (!category) return res.status(404).json({ message: 'Category not found.' });
+      
+      return res.status(200).json(category);
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  },
+
+  // Update category
+  async updateCategory(req, res) {
+    try {
+      const { category_name } = req.body;
+      const category = await Category.findByPk(req.params.id);
+      
+      if (!category) return res.status(404).json({ message: 'Category not found.' });
+
+      // Check if the new name is taken by another ID
+      if (category_name && category_name !== category.category_name) {
+        const duplicate = await Category.findOne({ where: { category_name } });
+        if (duplicate) {
+          return res.status(400).json({ message: 'New category name is already in use.' });
+        }
+      }
+
+      await category.update({ category_name });
+
+      // Refresh data
+      const updated = await Category.findByPk(category.id);
+      
+      return res.status(200).json(updated);
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  },
+
+  // Delete category
+  async deleteCategory(req, res) {
+    try {
+      const category = await Category.findByPk(req.params.id);
+      if (!category) return res.status(404).json({ message: 'Category not found.' });
+
+      await category.destroy();
+      return res.status(200).json({ message: 'Category removed successfully.' });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  },
+
+  // Add new focal type
+  async createFocal(req, res) {
+    try {
+      const { category_id, type } = req.body;
+
+      // 1. Check if Category exists
+      const category = await Category.findByPk(category_id);
+      if (!category) {
+        return res.status(404).json({ message: 'Category not found. Cannot assign focal type.' });
+      }
+
+      // 2. Uniqueness Check for 'type'
+      const existing = await Focal.findOne({ where: { type } });
+      if (existing) {
+        return res.status(400).json({ message: 'Focal type already exists.' });
+      }
+
+      const newFocal = await Focal.create({
+        category_id,
+        type
+      });
+
+      return res.status(201).json(newFocal);
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  },
+
+  // Get all focal types with category info
+  async getAllFocals(req, res) {
+    try {
+      const focals = await Focal.findAll({
+        include: [{
+          model: Category,
+          as: 'category'
+        }],
+        order: [['id', 'ASC']]
+      });
+      return res.status(200).json(focals);
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  },
+
+  // Get single focal type
+  async getFocalById(req, res) {
+    try {
+      const focal = await Focal.findByPk(req.params.id, {
+        include: ['category']
+      });
+      if (!focal) return res.status(404).json({ message: 'Focal type not found.' });
+
+      return res.status(200).json(focal);
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  },
+
+  // Update focal type
+  async updateFocal(req, res) {
+    try {
+      const { category_id, type } = req.body;
+      const focal = await Focal.findByPk(req.params.id);
+
+      if (!focal) return res.status(404).json({ message: 'Focal type not found.' });
+
+      // Uniqueness check if type is being changed
+      if (type && type !== focal.type) {
+        const duplicate = await Focal.findOne({ where: { type } });
+        if (duplicate) {
+          return res.status(400).json({ message: 'This focal type is already in use.' });
+        }
+      }
+
+      await focal.update({
+        category_id: category_id || focal.category_id,
+        type: type || focal.type
+      });
+
+      const updated = await Focal.findByPk(focal.id, { include: ['category'] });
+      return res.status(200).json(updated);
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  },
+
+  // Delete focal type
+  async deleteFocal(req, res) {
+    try {
+      const focal = await Focal.findByPk(req.params.id);
+      if (!focal) return res.status(404).json({ message: 'Focal type not found.' });
+
+      await focal.destroy();
+      return res.status(200).json({ message: 'Focal type removed successfully.' });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
   }
 };
+
 
 
