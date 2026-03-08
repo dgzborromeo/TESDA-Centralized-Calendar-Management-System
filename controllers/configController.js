@@ -509,7 +509,7 @@ async createDivision(req, res) {
     try {
       const categories = await Category.findAll({
         include: ['focal'],
-        order: [['created_at', 'DESC']]
+        order: [['id', 'ASC']]
       });
       return res.status(200).json(categories);
     } catch (err) {
