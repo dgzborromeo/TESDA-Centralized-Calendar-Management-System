@@ -11,6 +11,7 @@ const QSO_EMAIL = (process.env.QSO_EMAIL || 'qso@tesda.gov.ph').toLowerCase();
 const FMS_EMAIL = (process.env.FMS_EMAIL || 'fms@tesda.gov.ph').toLowerCase();
 const CLGEO_EMAIL = (process.env.CLGEO_EMAIL || 'clgeo@tesda.gov.ph').toLowerCase();
 const EBETO_EMAIL = (process.env.EBETO_EMAIL || 'ebeto@tesda.gov.ph').toLowerCase();
+const NCR_EMAIL = (process.env.NCR_EMAIL || 'ncr@tesda.gov.ph').toLowerCase();
 const CLUSTER_OSEC_EMAIL = (process.env.CLUSTER_OSEC_EMAIL || 'cluster.osec@tesda.gov.ph').toLowerCase();
 const CLUSTER_ODDG_PP_EMAIL = (process.env.CLUSTER_ODDG_PP_EMAIL || 'cluster.oddg.pp@tesda.gov.ph').toLowerCase();
 const CLUSTER_ODDG_AI_EMAIL = (process.env.CLUSTER_ODDG_AI_EMAIL || 'cluster.oddg.ai@tesda.gov.ph').toLowerCase();
@@ -32,6 +33,7 @@ const QSO_COLOR = '#ec4899'; // pink
 const FMS_COLOR = '#22c55e'; // green
 const CLGEO_COLOR = '#f59e0b'; // orange
 const EBETO_COLOR = '#8b5cf6'; // purple
+const NCR_COLOR = '#facc15'; // yellow
 
 const OFFICE_COLOR_PALETTE = [
   '#3b82f6', // blue
@@ -109,6 +111,11 @@ function isEbetoUser(user) {
   return email === EBETO_EMAIL;
 }
 
+function isNcrUser(user) {
+  const email = String(user?.email || '').toLowerCase();
+  return email === NCR_EMAIL;
+}
+
 function colorFromUserId(id) {
   const n = Number(id);
   if (!Number.isFinite(n)) return OFFICE_COLOR_PALETTE[0];
@@ -143,6 +150,7 @@ function assignedOfficeColor(user) {
   if (isFmsUser(user)) return FMS_COLOR;
   if (isClgeoUser(user)) return CLGEO_COLOR;
   if (isEbetoUser(user)) return EBETO_COLOR;
+  if (isNcrUser(user)) return NCR_COLOR;
   return colorFromUserId(user?.id);
 }
 
@@ -160,6 +168,7 @@ module.exports = {
   FMS_EMAIL,
   CLGEO_EMAIL,
   EBETO_EMAIL,
+  NCR_EMAIL,
   CLUSTER_OSEC_EMAIL,
   CLUSTER_ODDG_PP_EMAIL,
   CLUSTER_ODDG_AI_EMAIL,
@@ -180,6 +189,7 @@ module.exports = {
   FMS_COLOR,
   CLGEO_COLOR,
   EBETO_COLOR,
+  NCR_COLOR,
   isRomoUser,
   isOsecUser,
   isPoUser,
@@ -193,6 +203,7 @@ module.exports = {
   isFmsUser,
   isClgeoUser,
   isEbetoUser,
+  isNcrUser,
   colorFromUserId,
   assignedOfficeColor,
 };
