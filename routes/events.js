@@ -114,7 +114,7 @@ function attachmentPublicPath(fileName) {
 
 function requiredPostDocumentLabel(eventType) {
   const t = String(eventType || '').toLowerCase();
-  if (t === 'meeting' || t === 'zoom') return 'Minutes of the Meeting';
+  if (t === 'meeting' || t === 'zoom' || t === 'virtual' || t === 'hybrid' || t === 'face-to-face') return 'Minutes of the Meeting';
   return 'After Activity Report (AAR)';
 }
 
@@ -899,7 +899,7 @@ router.put('/:id', async (req, res) => {
         newStart,
         newEnd,
         location !== undefined ? location : e.location,
-        participants !== undefined ? location : e.participants,
+        participants !== undefined ? (participants || null) : (e.participants || null),
         description !== undefined ? description : e.description,
         regional_directors_label !== undefined
           ? regional_directors_label
