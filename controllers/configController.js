@@ -1,5 +1,7 @@
-const { Category, Focal, ConfigPosition, Office, Division, Position } = require('../models');
+const { Category, Focal, ConfigPosition, Office, Division, Position, Cluster, ClusterOffice, User, Schedule } = require('../models');
 const { Op } = require('sequelize');
+const path = require('path');
+const fs = require('fs'); 
 module.exports = {
   // 1. CREATE - Magdagdag ng bagong Office
 async create(req, res) {
@@ -665,6 +667,170 @@ async createDivision(req, res) {
 
       await focal.destroy();
       return res.status(200).json({ message: 'Focal type removed successfully.' });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  },
+
+    async getClusterMembers(req, res) {
+    try {
+      const members = await ClusterOffice.findAll({
+        include: [
+          {
+            model: Cluster,
+            as: 'cluster',
+            attributes: ['id', 'name', 'color'] // Para makuha yung cluster info
+          },
+          {
+            model: User,
+            as: 'user', 
+            attributes: ['id', 'name', 'email'] // Ito yung User/Office account info
+          }
+        ],
+        order: [['cluster_id', 'ASC']]
+      });
+
+      return res.status(200).json(members);
+    } catch (err) {
+      console.error('Error in getClusterMembers:', err);
+      return res.status(500).json({ error: err.message });
+    }
+  },
+
+  async getAllSchedule(req, res) {
+    try {
+      const schedules = await Schedule.findAll({
+        order: [['created_at', 'DESC']]
+      });
+      return res.status(200).json(schedules);
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  },
+
+  // GET one schedule by ID
+  async getByIdSchedule(req, res) {
+    try {
+      const schedule = await Schedule.findByPk(req.params.id);
+      if (!schedule) {
+        return res.status(404).json({ error: 'Schedule not found' });
+      }
+      return res.status(200).json(schedule);
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  },
+
+  // POST create new schedule
+  async createSchedule(req, res) {
+    try {
+      const { host_name, event_title } = req.body;
+
+      // Validation gaya ng sa Profile
+      if (!host_name || !event_title) {
+        return res.status(400).json({ error: "Host name and Event title are required." });
+      }
+
+      // 1. Paglilinis ng FileName (Logic base sa Profile mo)
+      const cleanHost = host_name ? host_name.replace(/\s+/g, '_') : 'NoHost';
+      const cleanTitle = event_title ? event_title.replace(/\s+/g, '_').substring(0, 20) : 'NoTitle';
+      const baseFileName = `${cleanHost}_${cleanTitle}_${Date.now()}`;
+
+      let attachmentFile = null;
+      let attachmentPath = null;
+
+      // 2. Handle File Upload
+      if (req.file) {
+        const ext = path.extname(req.file.originalname);
+        const newFileName = `${baseFileName}${ext}`;
+        const targetPath = path.join(__dirname, '..', 'uploads', 'schedules', newFileName);
+
+        // Siguraduhing existing ang folder
+        const dir = path.join(__dirname, '..', 'uploads', 'schedules');
+        if (!fs.existsSync(dir)) { fs.mkdirSync(dir, { recursive: true }); }
+
+        // I-rename ang inupload ni multer
+        fs.renameSync(req.file.path, targetPath);
+        
+        attachmentFile = req.file.originalname; // Original name
+        attachmentPath = `/uploads/schedules/${newFileName}`; // Public path
+      }
+
+      // 3. Database Save
+      const newSchedule = await Schedule.create({
+        ...req.body,
+        attachment_file: attachmentFile,
+        attachment_path: attachmentPath
+      });
+
+      return res.status(201).json(newSchedule);
+    } catch (err) {
+      return res.status(400).json({ error: err.message });
+    }
+  },
+
+  // POST (Update) schedule/:id
+  async updateSchedule(req, res) {
+    try {
+      const { id } = req.params;
+      const { host_name, event_title } = req.body;
+
+      let schedule = await Schedule.findByPk(id);
+      if (!schedule) {
+        return res.status(404).json({ error: 'Schedule not found' });
+      }
+
+      // 1. Prepare base filename para sa bagong file kung meron
+      const cleanHost = (host_name || schedule.host_name).replace(/\s+/g, '_');
+      const cleanTitle = (event_title || schedule.event_title).replace(/\s+/g, '_').substring(0, 20);
+      const baseFileName = `${cleanHost}_${cleanTitle}_${Date.now()}`;
+
+      let attachmentFile = schedule.attachment_file;
+      let attachmentPath = schedule.attachment_path;
+
+      // 2. Kung may bagong in-upload na file
+      if (req.file) {
+        // BURAHIN ANG LUMANG FILE (Logic base sa Profile mo)
+        if (schedule.attachment_path) {
+          const oldPath = path.join(__dirname, '..', schedule.attachment_path);
+          if (fs.existsSync(oldPath)) {
+            fs.unlinkSync(oldPath);
+          }
+        }
+
+        const ext = path.extname(req.file.originalname);
+        const newFileName = `${baseFileName}${ext}`;
+        const targetPath = path.join(__dirname, '..', 'uploads', 'schedules', newFileName);
+
+        fs.renameSync(req.file.path, targetPath);
+        
+        attachmentFile = req.file.originalname;
+        attachmentPath = `/uploads/schedules/${newFileName}`;
+      }
+
+      // 3. Update Database
+      await schedule.update({
+        ...req.body,
+        attachment_file: attachmentFile,
+        attachment_path: attachmentPath
+      });
+
+      return res.status(200).json(schedule);
+    } catch (err) {
+      return res.status(400).json({ error: err.message });
+    }
+  },
+
+  // DELETE schedule
+  async deleteSchedule(req, res) {
+    try {
+      const schedule = await Schedule.findByPk(req.params.id);
+      if (!schedule) {
+        return res.status(404).json({ error: 'Schedule not found' });
+      }
+
+      await schedule.destroy();
+      return res.status(200).json({ message: 'Schedule deleted successfully' });
     } catch (err) {
       return res.status(500).json({ error: err.message });
     }

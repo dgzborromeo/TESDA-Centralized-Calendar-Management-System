@@ -8,6 +8,7 @@ const configController = require('../controllers/configController');
 // Import Middlewares
 const { auth } = require('../middleware/auth');
 const upload = require('../middleware/uploadMiddleware');
+const uploadSchedule = require('../middleware/uploadScheduleMiddleware');
 
 // --- USER PROFILE ROUTES ---
 // Lahat ng profile routes ay dadaan sa auth middleware
@@ -62,4 +63,13 @@ router.get('/focals', configController.getAllFocals);
 router.get('/focal/:id', configController.getFocalById);
 router.post('/focal/:id', configController.updateFocal);
 router.delete('/focal/:id', configController.deleteFocal);
+
+router.get('/clusters', configController.getClusterMembers);
+
+//Schedule
+router.get('/schedules', configController.getAllSchedule);           // Kunin lahat
+router.get('/schedule/:id', configController.getByIdSchedule);      // Kunin ang isa via ID
+router.post('/schedule', uploadSchedule.single('attachment_file'), configController.createSchedule);         // Mag-add ng bago
+router.post('/schedule/:id', uploadSchedule.single('attachment_file'), configController.updateSchedule);        // Mag-edit ng record
+router.delete('/schedule/:id', configController.deleteSchedule);
 module.exports = router;
