@@ -1,4 +1,4 @@
-const { Category, Focal, ConfigPosition, Office, Division, Position, Cluster, ClusterOffice, User, Schedule } = require('../models');
+const { Category, Focal, ConfigPosition, Office, Division, Position, Cluster, ClusterOffice, User, Schedule, Focalship } = require('../models');
 const { Op } = require('sequelize');
 const path = require('path');
 const fs = require('fs'); 
@@ -831,6 +831,77 @@ async createDivision(req, res) {
 
       await schedule.destroy();
       return res.status(200).json({ message: 'Schedule deleted successfully' });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  },
+
+  async createFocalship(req, res) {
+    try {
+      const { name } = req.body;
+      if (!name) {
+        return res.status(400).json({ error: "Name is required." });
+      }
+
+      const focal = await Focalship.create({ name });
+      return res.status(201).json(focal);
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  },
+
+  // 2. READ ALL - Kunin lahat ng records
+  async getAllFocalship(req, res) {
+    try {
+      const focals = await Focalship.findAll({
+        order: [['id', 'DESC']]
+      });
+      return res.json(focals);
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  },
+
+  // 3. READ ONE - Kunin ang isang specific record gamit ang ID
+  async getOneFocalship(req, res) {
+    try {
+      const focal = await Focalship.findByPk(req.params.id);
+      if (!focal) {
+        return res.status(404).json({ error: "Record not found." });
+      }
+      return res.json(focal);
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  },
+
+  // 4. UPDATE - Baguhin ang pangalan ng focal record
+  async updateFocalship(req, res) {
+    try {
+      const { name } = req.body;
+      const focal = await Focalship.findByPk(req.params.id);
+
+      if (!focal) {
+        return res.status(404).json({ error: "Record not found." });
+      }
+
+      await focal.update({ name });
+      return res.json({ message: "Updated successfully", focal });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  },
+
+  // 5. DELETE - Tanggalin ang record
+  async deleteFocalship(req, res) {
+    try {
+      const focal = await Focalship.findByPk(req.params.id);
+      if (!focal) {
+        return res.status(404).json({ error: "Record not found." });
+      }
+
+      await focal.destroy();
+      return res.json({ message: "Deleted successfully" });
     } catch (err) {
       return res.status(500).json({ error: err.message });
     }

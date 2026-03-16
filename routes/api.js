@@ -4,6 +4,7 @@ const router = express.Router();
 // Import Controllers
 const userProfileController = require('../controllers/userProfileController');
 const configController = require('../controllers/configController');
+const userController = require('../controllers/userController')
 
 // Import Middlewares
 const { auth } = require('../middleware/auth');
@@ -37,11 +38,11 @@ router.get('/get-division/:id', auth, configController.getDivisionById);
 
 //POSITION
 // Positions Master List Endpoints
-router.get('/get-positions', auth, configController.getAllPositions);
-router.post('/add-position', auth, configController.createPosition);
-router.post('/update-position/:id', auth, configController.updatePosition);
-router.delete('/delete-position/:id', auth, configController.deletePosition);
-router.get('/get-position/:id', auth, configController.getPositionById);
+router.get('/get-positions', configController.getAllPositions);
+router.post('/add-position', configController.createPosition);
+router.post('/update-position/:id', configController.updatePosition);
+router.delete('/delete-position/:id', configController.deletePosition);
+router.get('/get-position/:id', configController.getPositionById);
 
 //SETUP POSITIOn
 // Config Positions (Assignments)
@@ -72,4 +73,15 @@ router.get('/schedule/:id', configController.getByIdSchedule);      // Kunin ang
 router.post('/schedule', uploadSchedule.single('attachment_file'), configController.createSchedule);         // Mag-add ng bago
 router.post('/schedule/:id', uploadSchedule.single('attachment_file'), configController.updateSchedule);        // Mag-edit ng record
 router.delete('/schedule/:id', configController.deleteSchedule);
+
+router.get('/users', userController.getAllUsers);
+router.post('/users', userController.createUser);
+router.post('/users/:id', userController.updateUser);
+router.delete('/users/:id', userController.deleteUser);
+
+router.post('/focalship', configController.createFocalship);        // Create
+router.get('/focalship', configController.getAllFocalship);         // Read All
+router.get('/focalship/:id', configController.getOneFocalship);     // Read One
+router.post('/focalship/:id', configController.updateFocalship);      // Update
+router.delete('/focalship/:id', configController.deleteFocalship);   // Delete
 module.exports = router;
