@@ -65,7 +65,7 @@ router.get('/focal/:id', configController.getFocalById);
 router.post('/focal/:id', configController.updateFocal);
 router.delete('/focal/:id', configController.deleteFocal);
 
-// router.get('/clustersOffice', configController.getClusterMembers);
+router.get('/clustersOffice', configController.getClusterMembers);
 router.get('/clusters', configController.getClusters);
 
 //Schedule
