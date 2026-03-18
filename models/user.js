@@ -24,11 +24,6 @@ module.exports = (sequelize, DataTypes) => {
         as: 'rsvps'
       });
 
-      this.hasMany(models.ClusterOffice, { 
-        foreignKey: 'user_id',
-        as: 'cluster_office'
-      });
-
       this.hasOne(models.UserProfile, {
         foreignKey: 'user_id',
         as: 'profile' // Para magamit mo: user.profile
