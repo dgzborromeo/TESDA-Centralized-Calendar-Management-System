@@ -1,12 +1,13 @@
-const { Category, Focal, ConfigPosition, Office, Division, Position, Cluster, ClusterOffice, User, Schedule, Focalship } = require('../models');
+const { Category, Focal, ConfigPosition, Office, Division, Position, Cluster, ClusterOffice, User, Schedule, Focalship, Region, Province } = require('../models');
 const { Op } = require('sequelize');
 const path = require('path');
 const fs = require('fs'); 
+const office = require('../models/office');
 module.exports = {
   // 1. CREATE - Magdagdag ng bagong Office
 async create(req, res) {
   try {
-    const { name, abbr } = req.body;
+    const { cluster_id, office_type, name, abbr } = req.body;
 
     // STEP 1: Trim the inputs
     const cleanName = name ? name.trim() : '';
@@ -26,7 +27,9 @@ async create(req, res) {
     }
 
     // STEP 3: Create gamit ang malinis na data
-    const office = await Office.create({ 
+    const office = await Office.create({
+      cluster_id: cluster_id,
+      office_type: office_type, 
       name: cleanName, 
       abbr: cleanAbbr 
     });
@@ -65,7 +68,7 @@ async create(req, res) {
   // 2. UPDATE OFFICE
 async update(req, res) {
   try {
-    const { name, abbr } = req.body;
+    const { cluster_id, office_type, name, abbr } = req.body;
     
     const cleanName = name ? name.trim() : '';
     const cleanAbbr = abbr ? abbr.trim() : '';
@@ -86,6 +89,8 @@ async update(req, res) {
     }
 
     await office.update({ 
+      cluster_id: cluster_id,
+      office_type: office_type, 
       name: cleanName, 
       abbr: cleanAbbr 
     });
@@ -296,7 +301,7 @@ async createDivision(req, res) {
   async getAllPositions(req, res) {
     try {
       const positions = await Position.findAll({
-        order: [['name', 'ASC']]
+        order: [['id', 'ASC']]
       });
       return res.status(200).json(positions);
     } catch (err) {
@@ -696,6 +701,17 @@ async createDivision(req, res) {
       return res.status(500).json({ error: err.message });
     }
   },
+  // Sa configController.js
+async getClusters(req, res) {
+  try {
+    const clusters = await Cluster.findAll({
+      order: [['id', 'ASC']]
+    });
+    return res.status(200).json(clusters);
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+},
 
   async getAllSchedule(req, res) {
     try {
@@ -905,7 +921,56 @@ async createDivision(req, res) {
     } catch (err) {
       return res.status(500).json({ error: err.message });
     }
+  },
+
+    async getAllRegions(req, res) {
+    try {
+      const regions = await Region.findAll({
+        order: [['id', 'ASC']]
+      });
+      return res.json(regions);
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  },
+
+      async getAllProvinces(req, res) {
+    try {
+      const provinces = await Province.findAll({
+        order: [['id', 'ASC']]
+      });
+      return res.json(provinces);
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  },
+
+  async getByRegion(req, res) {
+    try {
+      const { region_id } = req.params;
+      
+      const provinces = await Province.findAll({
+        where: { region_id },
+        order: [['name', 'ASC']]
+      });
+
+      return res.status(200).json(provinces);
+    } catch (error) {
+      console.error('Error fetching provinces:', error);
+      return res.status(500).json({ error: 'Internal Server Error' });
+    }
+  },
+
+  // (Optional) Kunin lahat ng provinces sa buong Pinas
+   async getAllProvinces(req, res) {
+    try {
+      const provinces = await Province.findAll({ order: [['name', 'ASC']] });
+      return res.status(200).json(provinces);
+    } catch (error) {
+      return res.status(500).json({ error: error.message });
+    }
   }
+
 };
 
 

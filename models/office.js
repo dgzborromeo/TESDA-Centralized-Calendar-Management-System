@@ -18,9 +18,16 @@ module.exports = (sequelize, DataTypes) => {
     foreignKey: 'office_id',
     as: 'divisions' 
   });
+
+      this.belongsTo(models.Cluster, { 
+    foreignKey: 'cluster_id',
+    as: 'cluster' 
+  });
     }
   }
   Office.init({
+    cluster_id: { type:DataTypes.INTEGER, allowNull:true},
+    office_type: DataTypes.ENUM('CO', 'RO', 'PO', 'DO', 'TI'),
     name: { type:DataTypes.STRING, allowNull:true, unique:true },
     abbr: { type:DataTypes.STRING, allowNull:true},
   }, {
@@ -28,6 +35,7 @@ module.exports = (sequelize, DataTypes) => {
     modelName: 'Office',
     tableName: 'offices',
     underscored: true,
+    timestamps: true,
     updated_at: false,          // Walang updated_at sa migration mo
     created_at: 'created_at'
   });

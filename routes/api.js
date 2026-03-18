@@ -24,7 +24,7 @@ router.delete('/profile/remove', auth, userProfileController.deleteProfile);
 // -----CONFIGURATIONS API HERE -----
 // OFFICE
 router.post('/add-office', auth, configController.create);
-router.get('/get-offices', auth, configController.getAll);
+router.get('/get-offices', configController.getAll);
 router.get('/get-office/:id', auth, configController.getById);
 router.post('/update-office/:id', auth, configController.update);
 router.delete('/delete-office/:id', auth, configController.delete);
@@ -65,7 +65,8 @@ router.get('/focal/:id', configController.getFocalById);
 router.post('/focal/:id', configController.updateFocal);
 router.delete('/focal/:id', configController.deleteFocal);
 
-router.get('/clusters', configController.getClusterMembers);
+router.get('/clustersOffice', configController.getClusterMembers);
+router.get('/clusters', configController.getClusters);
 
 //Schedule
 router.get('/schedules', configController.getAllSchedule);           // Kunin lahat
@@ -84,4 +85,8 @@ router.get('/focalship', configController.getAllFocalship);         // Read All
 router.get('/focalship/:id', configController.getOneFocalship);     // Read One
 router.post('/focalship/:id', configController.updateFocalship);      // Update
 router.delete('/focalship/:id', configController.deleteFocalship);   // Delete
+
+router.get('/regions', configController.getAllRegions);
+router.get('/provinces/:region_id', configController.getByRegion);
+router.get('/provinces', configController.getAllProvinces);   
 module.exports = router;
