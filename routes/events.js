@@ -113,9 +113,7 @@ function attachmentPublicPath(fileName) {
 }
 
 function requiredPostDocumentLabel(eventType) {
-  const t = String(eventType || '').toLowerCase();
-  if (t === 'meeting' || t === 'zoom' || t === 'virtual' || t === 'hybrid' || t === 'face-to-face') return 'Minutes of the Meeting';
-  return 'After Activity Report (AAR)';
+  return 'After Activity Report (AAR)/Minutes of the Meeting';
 }
 
 function encodePostDocumentName(originalName, eventType) {
@@ -123,20 +121,56 @@ function encodePostDocumentName(originalName, eventType) {
   return `[POSTDOC:${label}] ${String(originalName || '').trim()}`;
 }
 
+function encodeAttendanceSheetName(originalName) {
+  return `[ATTENDANCE] ${String(originalName || '').trim()}`;
+}
+
+function encodePhotoName(slot, originalName) {
+  return `[PHOTO:${slot}] ${String(originalName || '').trim()}`;
+}
+
 function parsePostDocumentName(name) {
   const raw = String(name || '');
-  const m = raw.match(/^\[POSTDOC:([^\]]+)\]\s*(.*)$/i);
-  if (!m) {
+  const postDocMatch = raw.match(/^\[POSTDOC:([^\]]+)\]\s*(.*)$/i);
+  if (postDocMatch) {
     return {
-      isPostDocument: false,
-      label: '',
-      displayName: raw,
+      isPostDocument: true,
+      isAttendanceSheet: false,
+      photoSlot: null,
+      label: String(postDocMatch[1] || '').trim(),
+      displayName: String(postDocMatch[2] || '').trim() || raw,
     };
   }
+
+  const attendanceMatch = raw.match(/^\[ATTENDANCE\]\s*(.*)$/i);
+  if (attendanceMatch) {
+    return {
+      isPostDocument: false,
+      isAttendanceSheet: true,
+      photoSlot: null,
+      label: 'Attendance Sheet',
+      displayName: String(attendanceMatch[1] || '').trim() || raw,
+    };
+  }
+
+  const photoMatch = raw.match(/^\[PHOTO:(\d+)\]\s*(.*)$/i);
+  if (photoMatch) {
+    const slot = parseInt(photoMatch[1], 10);
+    return {
+      isPostDocument: false,
+      isAttendanceSheet: false,
+      photoSlot: Number.isFinite(slot) ? slot : null,
+      label: Number.isFinite(slot) ? `Photo ${slot}` : 'Photo',
+      displayName: String(photoMatch[2] || '').trim() || raw,
+    };
+  }
+
   return {
-    isPostDocument: true,
-    label: String(m[1] || '').trim(),
-    displayName: String(m[2] || '').trim() || raw,
+    isPostDocument: false,
+    isAttendanceSheet: false,
+    photoSlot: null,
+    label: '',
+    displayName: raw,
   };
 }
 
@@ -393,6 +427,8 @@ router.get('/:id', async (req, res) => {
         ...a,
         original_name: postMeta.displayName,
         is_post_document: postMeta.isPostDocument,
+        is_attendance_sheet: postMeta.isAttendanceSheet,
+        photo_slot: postMeta.photoSlot,
         post_document_label: postMeta.label || null,
         url: attachmentPublicPath(a.file_name),
       };
@@ -794,6 +830,81 @@ router.post('/:id/post-document', upload.single('attachment'), async (req, res) 
   } catch (err) {
     console.error('Upload post-document:', err);
     res.status(500).json({ error: 'Failed to upload post-event document.' });
+  }
+});
+
+// POST /api/events/:id/supporting-document - host uploads attendance/photo docs for done events
+router.post('/:id/supporting-document', upload.single('attachment'), async (req, res) => {
+  try {
+    const eventId = parseInt(req.params.id, 10);
+    if (!Number.isFinite(eventId)) return res.status(400).json({ error: 'Invalid event id.' });
+    if (!req.file) return res.status(400).json({ error: 'Attachment file is required.' });
+
+    const documentType = String(req.body?.document_type || '').trim().toLowerCase();
+    const validTypes = new Set(['post_document', 'attendance_sheet', 'photo_1', 'photo_2', 'photo_3']);
+    if (!validTypes.has(documentType)) {
+      return res.status(400).json({ error: 'Invalid document_type. Use post_document, attendance_sheet, photo_1, photo_2, or photo_3.' });
+    }
+
+    const [rows] = await db.query('SELECT * FROM events WHERE id = ?', [eventId]);
+    if (rows.length === 0) return res.status(404).json({ error: 'Event not found.' });
+    const event = rows[0];
+    if (String(event.status || 'active') === 'cancelled') {
+      return res.status(400).json({ error: 'Cannot upload supporting documents for a cancelled event.' });
+    }
+    if (Number(event.created_by) !== Number(req.user.id)) {
+      return res.status(403).json({ error: 'Only the event host can upload this document.' });
+    }
+    if (!isEventDoneRecord(event)) {
+      return res.status(400).json({ error: 'Supporting documents can only be uploaded once the event is done.' });
+    }
+
+    let taggedOriginalName = '';
+    let replacePattern = '';
+    if (documentType === 'post_document') {
+      taggedOriginalName = encodePostDocumentName(req.file.originalname, event.type);
+    } else if (documentType === 'attendance_sheet') {
+      taggedOriginalName = encodeAttendanceSheetName(req.file.originalname);
+      replacePattern = '[ATTENDANCE]%';
+    } else {
+      const slot = parseInt(documentType.split('_')[1], 10);
+      taggedOriginalName = encodePhotoName(slot, req.file.originalname);
+      replacePattern = `[PHOTO:${slot}]%`;
+    }
+
+    // Keep only one attendance/photo per slot by replacing old file record (and file on disk when possible).
+    if (replacePattern) {
+      const [existing] = await db.query(
+        `SELECT id, file_name FROM event_attachments WHERE event_id = ? AND original_name LIKE ?`,
+        [eventId, replacePattern]
+      );
+      for (const row of existing) {
+        try {
+          fs.unlinkSync(path.join(uploadsDir, row.file_name));
+        } catch {
+          // Ignore missing/locked files and still remove DB rows.
+        }
+      }
+      await db.query(
+        `DELETE FROM event_attachments WHERE event_id = ? AND original_name LIKE ?`,
+        [eventId, replacePattern]
+      );
+    }
+
+    await db.query(
+      `INSERT INTO event_attachments (event_id, file_name, original_name, mime_type, size_bytes)
+       VALUES (?, ?, ?, ?, ?)`,
+      [eventId, req.file.filename, taggedOriginalName, req.file.mimetype || null, req.file.size || 0]
+    );
+
+    res.status(201).json({
+      success: true,
+      document_type: documentType,
+      required_post_document: requiredPostDocumentLabel(event.type),
+    });
+  } catch (err) {
+    console.error('Upload supporting-document:', err);
+    res.status(500).json({ error: 'Failed to upload supporting document.' });
   }
 });
 
