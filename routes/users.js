@@ -81,7 +81,27 @@ router.get('/', async (req, res) => {
   try {
     const cfg = await resolveUserNameConfig(db);
     const [users] = await db.query(
-      `SELECT id, ${cfg.selectExpr('users')} AS name, email, role, created_at FROM users ORDER BY name`
+      `SELECT 
+        u.id,
+        ${cfg.selectExpr('u')} AS name,
+        u.email,
+        u.password,
+        u.role,
+        u.email_verified_at,
+        u.created_at,
+        p.first_name,
+        p.middle_name,
+        p.last_name,
+        p.designation,
+        p.phone_number,
+        p.office,
+        p.division,
+        p.cluster,
+        p.region,
+        p.province_district
+      FROM users u
+      LEFT JOIN user_profiles p ON p.user_id = u.id
+      ORDER BY name`
     );
     res.json(users);
   } catch (err) {

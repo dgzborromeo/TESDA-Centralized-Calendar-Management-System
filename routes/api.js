@@ -81,10 +81,10 @@ router.post('/add-schedule', uploadSchedule.single('attachment_file'), scheduleC
 router.post('/update-schedule/:id', uploadSchedule.single('attachment_file'), scheduleController.updateSched);
 router.delete('/delete-schedule/:id', scheduleController.deleteSched);
 
-router.get('/users', userController.getAllUsers);
-router.post('/users', userController.createUser);
-router.post('/users/:id', userController.updateUser);
-router.delete('/users/:id', userController.deleteUser);
+router.get('/users', auth, userController.getAllUsers);
+router.post('/users', auth, userController.createUser);
+router.post('/users/:id', auth, userController.updateUser);
+router.delete('/users/:id', auth, userController.deleteUser);
 
 router.post('/focalship', configController.createFocalship);        // Create
 router.get('/focalship', configController.getAllFocalship);         // Read All
