@@ -75,10 +75,10 @@ router.post('/schedule', uploadSchedule.single('attachment_file'), configControl
 router.post('/schedule/:id', uploadSchedule.single('attachment_file'), configController.updateSchedule);        // Mag-edit ng record
 router.delete('/schedule/:id', configController.deleteSchedule);
 
-router.get('/users', userController.getAllUsers);
-router.post('/users', userController.createUser);
-router.post('/users/:id', userController.updateUser);
-router.delete('/users/:id', userController.deleteUser);
+router.get('/users', auth, userController.getAllUsers);
+router.post('/users', auth, userController.createUser);
+router.post('/users/:id', auth, userController.updateUser);
+router.delete('/users/:id', auth, userController.deleteUser);
 
 router.post('/focalship', configController.createFocalship);        // Create
 router.get('/focalship', configController.getAllFocalship);         // Read All
