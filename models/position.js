@@ -8,6 +8,10 @@ module.exports = (sequelize, DataTypes) => {
         foreignKey: 'position_id',
         as: 'configurations' 
       });
+    this.hasMany(models.ScheduleParticipant, {
+        foreignKey: 'designation_id',
+        as: 'schedule_participants'
+      });
     }
   }
   Position.init({

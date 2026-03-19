@@ -8,7 +8,10 @@ module.exports = (sequelize, DataTypes) => {
      * Dito mo ilalagay kung may foreign keys ka (e.g., belongsTo, hasMany).
      */
     static associate(models) {
-      // halimbawa: this.belongsTo(models.User, { foreignKey: 'user_id' });
+      this.hasMany(models.ScheduleParticipant, {
+        foreignKey: 'schedule_id',
+        as: 'schedule_participants'
+      });
     }
   }
 

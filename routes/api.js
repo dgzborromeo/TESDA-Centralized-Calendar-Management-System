@@ -4,8 +4,8 @@ const router = express.Router();
 // Import Controllers
 const userProfileController = require('../controllers/userProfileController');
 const configController = require('../controllers/configController');
-const userController = require('../controllers/userController')
-
+const userController = require('../controllers/userController');
+const scheduleController = require('../controllers/scheduleController');
 // Import Middlewares
 const { auth } = require('../middleware/auth');
 const upload = require('../middleware/uploadMiddleware');
@@ -74,6 +74,12 @@ router.get('/schedule/:id', configController.getByIdSchedule);      // Kunin ang
 router.post('/schedule', uploadSchedule.single('attachment_file'), configController.createSchedule);         // Mag-add ng bago
 router.post('/schedule/:id', uploadSchedule.single('attachment_file'), configController.updateSchedule);        // Mag-edit ng record
 router.delete('/schedule/:id', configController.deleteSchedule);
+
+router.get('/getSchedules', scheduleController.getAllSched);
+router.get('/getSchedule/:id', scheduleController.getSchedById);
+router.post('/add-schedule', uploadSchedule.single('attachment_file'), scheduleController.createSched);
+router.post('/update-schedule/:id', uploadSchedule.single('attachment_file'), scheduleController.updateSched);
+router.delete('/delete-schedule/:id', scheduleController.deleteSched);
 
 router.get('/users', userController.getAllUsers);
 router.post('/users', userController.createUser);
