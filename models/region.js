@@ -14,6 +14,7 @@ module.exports = (sequelize, DataTypes) => {
     foreignKey: 'region_id',
     as: 'province' 
     });
+     this.hasMany(models.UserProfile, { foreignKey: 'region_id', as: 'user_profile' });
     }
   }
   Region.init({

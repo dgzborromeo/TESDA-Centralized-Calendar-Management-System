@@ -23,6 +23,7 @@ module.exports = (sequelize, DataTypes) => {
     foreignKey: 'cluster_id',
     as: 'cluster' 
   });
+   this.hasMany(models.UserProfile, { foreignKey: 'office_id', as: 'user_profile' });
     }
   }
   Office.init({

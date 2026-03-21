@@ -82,8 +82,9 @@ router.post('/update-schedule/:id', uploadSchedule.single('attachment_file'), sc
 router.delete('/delete-schedule/:id', scheduleController.deleteSched);
 
 router.get('/users', auth, userController.getAllUsers);
-router.post('/users', auth, userController.createUser);
+router.post('/users', userController.createUser);
 router.post('/users/:id', auth, userController.updateUser);
+router.get('/users/:id', auth, userController.getUserById);
 router.delete('/users/:id', auth, userController.deleteUser);
 
 router.post('/focalship', configController.createFocalship);        // Create

@@ -12,6 +12,7 @@ module.exports = (sequelize, DataTypes) => {
         foreignKey: 'designation_id',
         as: 'schedule_participants'
       });
+    this.hasMany(models.UserProfile, { foreignKey: 'cluster_id', as: 'user_profile' });
     }
   }
   Position.init({
