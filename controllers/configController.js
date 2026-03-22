@@ -267,35 +267,28 @@ async createDivision(req, res) {
   // CONFIG FOR POSITION
   // 1. CREATE POSITION (Master List)
   async createPosition(req, res) {
-    try {
-      const { name } = req.body;
+  try {
+    const { name, has_sub_menu, sub_menu_type, sub_menu_source } = req.body; // Dagdag ang fields
 
-      // STEP 1: Trim the input
-      const cleanName = name ? name.trim() : '';
+    const cleanName = name ? name.trim() : '';
+    if (!cleanName) return res.status(400).json({ message: 'Position name is required.' });
 
-      if (!cleanName) {
-        return res.status(400).json({ message: 'Position name is required.' });
-      }
+    const existing = await Position.findOne({ where: { name: cleanName } });
+    if (existing) return res.status(400).json({ message: 'This position already exists.' });
 
-      // STEP 2: Check uniqueness (Case-insensitive check sa master list)
-      const existing = await Position.findOne({ 
-        where: { name: cleanName } 
-      });
-
-      if (existing) {
-        return res.status(400).json({ message: 'This position already exists in the master list.' });
-      }
-
-      // STEP 3: Create
-      const position = await Position.create({ 
-        name: cleanName 
-      });
-      
-      return res.status(201).json(position);
-    } catch (err) {
-      return res.status(500).json({ error: err.message });
-    }
-  },
+    // Isama ang bagong columns sa pag-create
+    const position = await Position.create({ 
+      name: cleanName,
+      has_sub_menu: has_sub_menu || false,
+      sub_menu_type: sub_menu_type || null,
+      sub_menu_source: sub_menu_source || null
+    });
+    
+    return res.status(201).json(position);
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+},
 
   // 2. GET ALL POSITIONS
   async getAllPositions(req, res) {
@@ -323,30 +316,27 @@ async createDivision(req, res) {
   },
 
   // 3. UPDATE POSITION
-  async updatePosition(req, res) {
-    try {
-      const { name } = req.body;
-      const cleanName = name ? name.trim() : '';
+ async updatePosition(req, res) {
+  try {
+    const { name, has_sub_menu, sub_menu_type, sub_menu_source } = req.body;
+    const cleanName = name ? name.trim() : '';
 
-      const position = await Position.findByPk(req.params.id);
-      if (!position) {
-        return res.status(404).json({ message: 'Position not found.' });
-      }
+    const position = await Position.findByPk(req.params.id);
+    if (!position) return res.status(404).json({ message: 'Position not found.' });
 
-      // Uniqueness check kung binago ang pangalan
-      if (cleanName && cleanName !== position.name) {
-        const duplicate = await Position.findOne({ where: { name: cleanName } });
-        if (duplicate) {
-          return res.status(400).json({ message: 'Position name already exists.' });
-        }
-      }
+    // Update with new fields
+    await position.update({ 
+      name: cleanName || position.name,
+      has_sub_menu: has_sub_menu !== undefined ? has_sub_menu : position.has_sub_menu,
+      sub_menu_type: sub_menu_type, 
+      sub_menu_source: sub_menu_source
+    });
 
-      await position.update({ name: cleanName });
-      return res.status(200).json(position);
-    } catch (err) {
-      return res.status(500).json({ error: err.message });
-    }
-  },
+    return res.status(200).json(position);
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+},
 
   // 4. DELETE POSITION
   async deletePosition(req, res) {

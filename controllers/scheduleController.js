@@ -17,14 +17,22 @@ const findConflicts = async (selectedPositions, start_date, end_date, start_time
                 as: 'schedule',
                 attributes: ['event_title', 'start_date', 'end_date', 'start_time', 'end_time'],
                 where: {
+                    // 1. Huwag isama ang sarili kung update ito
                     id: excludeScheduleId ? { [Op.ne]: excludeScheduleId } : { [Op.not]: null },
+                    
+                    // 2. DATE OVERLAP: (ExistingStart <= NewEnd) AND (ExistingEnd >= NewStart)
                     [Op.and]: [
                         { start_date: { [Op.lte]: end_date } },
-                        { end_date: { [Op.gte]: start_date } }
-                    ],
-                    [Op.and]: [
-                        { start_time: { [Op.lt]: end_time } },
-                        { end_time: { [Op.gt]: start_time } }
+                        { end_date: { [Op.gte]: start_date } },
+                        
+                        // 3. TIME OVERLAP: (ExistingStartTime < NewEndTime) AND (ExistingEndTime > NewStartTime)
+                        // Nilagay natin ito sa loob ng parehong Op.and para gumana lang siya kung PASOK ang date.
+                        {
+                            [Op.and]: [
+                                { start_time: { [Op.lt]: end_time } },
+                                { end_time: { [Op.gt]: start_time } }
+                            ]
+                        }
                     ]
                 }
             },
@@ -61,49 +69,68 @@ const formatConflictMessages = async (conflicts) => {
         let posName = c.designation?.name || 'Participant';
         let locationName = "";
 
-        if (posName.toLowerCase().includes("regional director") && c.target_type === 'province') {
+        // Siguraduhin nating lowercase at walang extra space para sa switch logic
+        const type = c.target_type ? String(c.target_type).toLowerCase().trim() : "";
+
+        // Label adjustment para sa Provincial Director
+        if (posName.toLowerCase().includes("regional director") && type === 'province') {
             posName = "Provincial Director";
         }
 
         if (c.is_all) {
             locationName = "(All)";
         } else {
-            const type = c.target_type ? c.target_type.toLowerCase() : "";
             switch (type) {
                 case 'region':
                     const reg = await Region.findByPk(c.target_id);
                     locationName = reg ? `(${reg.region})` : `(Region ID: ${c.target_id})`;
                     break;
+
+                // DITO ANG FIX: Pinagsama natin ang province at district 
+                // dahil sabi mo pareho silang nasa 'provinces' table.
                 case 'province':
+                case 'prov':
+                case 'district': 
                     const prov = await Province.findByPk(c.target_id);
-                    locationName = prov ? `(${prov.province_name || prov.name})` : `(Province ID: ${c.target_id})`;
+                    // 'name' lang ang column mo sa model, kaya prov.name lang dapat
+                    locationName = prov ? `(${prov.name})` : `(${type.toUpperCase()} ID: ${c.target_id})`;
                     break;
+
                 case 'office':
                     const off = await Office.findByPk(c.target_id);
                     locationName = off ? `(${off.name || off.abbr})` : `(Office ID: ${c.target_id})`;
                     break;
+
                 case 'cluster':
                     const clus = await Cluster.findByPk(c.target_id);
                     locationName = clus ? `(${clus.name})` : `(Cluster ID: ${c.target_id})`;
                     break;
+
                 case 'co': locationName = "(Central Office)"; break;
                 case 'ro': locationName = "(Regional Office)"; break;
                 case 'po': locationName = "(Provincial Office)"; break;
                 case 'do': locationName = "(District Office)"; break;
                 case 'ti': locationName = "(Training Institute)"; break;
+                
                 default:
+                    // Kung hindi pumasok sa cases sa itaas, dito babagsak
                     locationName = c.target_id ? `(ID: ${c.target_id})` : "";
             }
         }
 
         const sched = c.schedule;
         const formatTime = (timeStr) => {
+            if (!timeStr) return "";
             const [h, m] = timeStr.split(':');
             const hour = parseInt(h);
             return `${hour % 12 || 12}:${m} ${hour >= 12 ? 'PM' : 'AM'}`;
         };
 
-        return `${locationName} ${posName} is already a participant in "${sched.event_title}" on ${sched.start_date} (${formatTime(sched.start_time)} - ${formatTime(sched.end_time)})`;
+        const dateDisplay = sched.start_date === sched.end_date 
+            ? sched.start_date 
+            : `${sched.start_date} to ${sched.end_date}`;
+
+        return `${locationName} ${posName} is already a participant in "${sched.event_title}" on ${dateDisplay} (${formatTime(sched.start_time)} - ${formatTime(sched.end_time)})`;
     }));
 };
 
@@ -139,7 +166,7 @@ module.exports = {
                 attachmentPath = `/uploads/schedules/${newFileName}`;
             }
 
-            const schedule = await Schedule.create({ ...req.body, attachment_file: attachmentFile, attachment_path: attachmentPath }, { transaction: t });
+            const schedule = await Schedule.create({ ...req.body, status: 'Tentative', attachment_file: attachmentFile, attachment_path: attachmentPath }, { transaction: t });
 
             if (selectedPositions) {
                 const positions = typeof selectedPositions === 'string' ? JSON.parse(selectedPositions) : selectedPositions;

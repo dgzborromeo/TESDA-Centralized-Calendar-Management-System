@@ -23,7 +23,13 @@ module.exports = (sequelize, DataTypes) => {
       validate: {
         notEmpty: true
       }
-    }
+    },
+    has_sub_menu: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false
+    },
+    sub_menu_type: DataTypes.STRING,
+    sub_menu_source: DataTypes.STRING,
   }, {
     sequelize,
     modelName: 'Position',

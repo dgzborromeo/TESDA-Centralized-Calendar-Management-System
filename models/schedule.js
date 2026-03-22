@@ -69,6 +69,10 @@ module.exports = (sequelize, DataTypes) => {
     attachment_path: {
       type: DataTypes.TEXT,
       allowNull: true
+    },
+    status: {
+      type: DataTypes.STRING,
+      defaultValue: 'Tentative'
     }
   }, {
     sequelize,
