@@ -15,7 +15,7 @@ const findConflicts = async (selectedPositions, start_date, end_date, start_time
             {
                 model: Schedule,
                 as: 'schedule',
-                attributes: ['event_title', 'start_date', 'end_date', 'start_time', 'end_time'],
+                attributes: ['id', 'event_title', 'start_date', 'end_date', 'start_time', 'end_time'],
                 where: {
                     // 1. Huwag isama ang sarili kung update ito
                     id: excludeScheduleId ? { [Op.ne]: excludeScheduleId } : { [Op.not]: null },
@@ -135,6 +135,36 @@ const formatConflictMessages = async (conflicts) => {
 };
 
 module.exports = {
+
+    // POST: check conflicts before saving (live conflict preview)
+    async checkConflict(req, res) {
+        try {
+            const { selectedPositions, start_date, end_date, start_time, end_time } = req.body;
+            if (!selectedPositions || !start_date || !start_time || !end_time) {
+                return res.json({ conflicts: [] });
+            }
+            const positions = typeof selectedPositions === 'string' ? JSON.parse(selectedPositions) : selectedPositions;
+            if (!positions.length) return res.json({ conflicts: [] });
+
+            const effectiveEndDate = end_date || start_date;
+            const conflicts = await findConflicts(positions, start_date, effectiveEndDate, start_time, end_time);
+
+            const messages = await formatConflictMessages(conflicts);
+            const conflictingScheduleIds = [...new Set(
+                conflicts.map(c => c.schedule?.id).filter(Boolean)
+            )];
+
+            return res.json({
+                hasConflict: conflicts.length > 0,
+                messages: [...new Set(messages)],
+                scheduleIds: conflictingScheduleIds,
+            });
+        } catch (err) {
+            console.error('checkConflict error:', err);
+            return res.status(500).json({ error: err.message });
+        }
+    },
+
     // POST: createSchedule
         async createSched(req, res) {
         const t = await sequelize.transaction();
@@ -367,10 +397,14 @@ async getAllSched(req, res) {
                 }));
             }
 
-            // Linisin ang lumang association fields
-            delete plainSched.schedule_participants; 
-            // Iniiwan natin ang plainSched.user para sa frontend backup
-            
+            // Keep raw participant ids for frontend conflict checking
+            plainSched.rawParticipants = sourceParticipants.map(p => ({
+                designation_id: p.designation_id,
+                target_id: p.target_id,
+                target_type: p.target_type,
+                is_all: p.is_all,
+            }));
+            delete plainSched.schedule_participants;
             return plainSched;
         }));
 
