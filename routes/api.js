@@ -77,6 +77,7 @@ router.delete('/schedule/:id', configController.deleteSchedule);
 
 router.get('/getSchedules', scheduleController.getAllSched);
 router.get('/getSchedule/:id', scheduleController.getSchedById);
+router.post('/check-schedule-conflict', scheduleController.checkConflict);
 router.post('/add-schedule', uploadSchedule.single('attachment_file'), scheduleController.createSched);
 router.post('/update-schedule/:id', uploadSchedule.single('attachment_file'), scheduleController.updateSched);
 router.delete('/delete-schedule/:id', scheduleController.deleteSched);
