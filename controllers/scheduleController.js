@@ -195,7 +195,7 @@ module.exports = {
                     return res.status(409).json({ 
                         error: "Schedule Conflict Detected", 
                         conflicts: [...new Set(details)],
-                        message: "Please select a time after the conflicting event ends."
+                        message: "Would you like to: (a) Change the participants or (b) Change the date/time of your activity?"
                     });
                 }
             }
