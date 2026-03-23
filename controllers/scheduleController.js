@@ -265,22 +265,143 @@ module.exports = {
         } catch (err) { return res.status(500).json({ error: err.message }); }
     },
 
-    async getAllSched(req, res) {
-        try {
-            const data = await Schedule.findAll({
-                include: [{ model: ScheduleParticipant, as: 'participants', include: [{ model: Position, as: 'designation' }] }],
-                order: [['start_date', 'DESC'], ['start_time', 'DESC']]
-            });
-            return res.status(200).json(data);
-        } catch (err) { return res.status(500).json({ error: err.message }); }
-    },
+async getAllSched(req, res) {
+    try {
+        const data = await Schedule.findAll({
+            include: [{ 
+                model: ScheduleParticipant, 
+                as: 'schedule_participants', 
+                required: false,
+                include: [{ model: Position, as: 'designation' }] 
+            }],
+            order: [['start_date', 'DESC'], ['start_time', 'DESC']]
+        });
+
+        // Paggamit ng map na may Promise.all para sigurado ang async-await
+        const formattedData = await Promise.all(data.map(async (sched) => {
+            const plainSched = sched.get({ plain: true });
+
+            // Kunin ang participants mula sa association (underscored format)
+            const sourceParticipants = plainSched.schedule_participants || [];
+
+            if (sourceParticipants.length > 0) {
+                plainSched.participantDetails = await Promise.all(sourceParticipants.map(async (p) => {
+                    let locationName = "";
+                    const type = p.target_type ? String(p.target_type).toLowerCase().trim() : "";
+
+                    if (p.is_all) {
+                        locationName = "(All)";
+                    } else {
+                        // Switch logic para makuha ang actual names mula sa tables
+                        switch (type) {
+                            case 'region':
+                                const reg = await Region.findByPk(p.target_id);
+                                locationName = reg ? `(${reg.region})` : "";
+                                break;
+                            case 'province':
+                            case 'prov':
+                            case 'district':
+                                const prov = await Province.findByPk(p.target_id);
+                                locationName = prov ? `(${prov.name})` : "";
+                                break;
+                            case 'office':
+                                const off = await Office.findByPk(p.target_id);
+                                locationName = off ? `(${off.name || off.abbr})` : "";
+                                break;
+                            case 'cluster':
+                                const clus = await Cluster.findByPk(p.target_id);
+                                locationName = clus ? `(${clus.name})` : "";
+                                break;
+                            default:
+                                locationName = p.target_type ? `(${p.target_type})` : "";
+                        }
+                    }
+
+                    return {
+                        id: p.id,
+                        designation: p.designation?.name || 'Participant',
+                        location: locationName
+                    };
+                }));
+            } else {
+                plainSched.participantDetails = [];
+            }
+
+            // Linisin ang output
+            delete plainSched.schedule_participants; 
+            // Iniiwasan nating malito sa lumang "participants" string field
+            // delete plainSched.participants; 
+
+            return plainSched;
+        }));
+
+        return res.status(200).json(formattedData);
+    } catch (err) { 
+        console.error("Error in getAllSched:", err);
+        return res.status(500).json({ error: err.message }); 
+    }
+},
 
     async getSchedById(req, res) {
-        try {
-            const data = await Schedule.findByPk(req.params.id, {
-                include: [{ model: ScheduleParticipant, as: 'participants', include: [{ model: Position, as: 'designation' }] }]
-            });
-            return data ? res.status(200).json(data) : res.status(404).json({ error: 'Not found' });
-        } catch (err) { return res.status(500).json({ error: err.message }); }
+    try {
+        const data = await Schedule.findByPk(req.params.id, {
+            include: [{ 
+                model: ScheduleParticipant, 
+                as: 'schedule_participants', 
+                include: [{ model: Position, as: 'designation' }] 
+            }]
+        });
+
+        if (!data) return res.status(404).json({ error: 'Not found' });
+
+        const plainSched = data.get({ plain: true });
+
+        // Gawin nating readable ang listahan ng participants
+        if (plainSched.schedule_participants) {
+            plainSched.formattedParticipants = await Promise.all(plainSched.schedule_participants.map(async (p) => {
+                let locationName = "";
+                const type = p.target_type ? String(p.target_type).toLowerCase().trim() : "";
+
+                if (p.is_all) {
+                    locationName = "(All)";
+                } else {
+                    switch (type) {
+                        case 'region':
+                            const reg = await Region.findByPk(p.target_id);
+                            locationName = reg ? `(${reg.region})` : "";
+                            break;
+                        case 'province':
+                        case 'prov':
+                        case 'district':
+                            const prov = await Province.findByPk(p.target_id);
+                            locationName = prov ? `(${prov.name})` : "";
+                            break;
+                        case 'office':
+                            const off = await Office.findByPk(p.target_id);
+                            locationName = off ? `(${off.name || off.abbr})` : "";
+                            break;
+                        case 'cluster':
+                            const clus = await Cluster.findByPk(p.target_id);
+                            locationName = clus ? `(${clus.name})` : "";
+                            break;
+                    }
+                }
+                return {
+                    id: p.id,
+                    designation: p.designation?.name || 'Participant',
+                    location: locationName,
+                    target_type: p.target_type,
+                    target_id: p.target_id
+                };
+            }));
+        }
+
+        // Tanggalin ang luma at redundant na field
+        delete plainSched.participants;
+
+        return res.status(200).json(plainSched);
+    } catch (err) { 
+        return res.status(500).json({ error: err.message }); 
     }
+}
 };
