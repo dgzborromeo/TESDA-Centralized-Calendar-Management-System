@@ -28,6 +28,10 @@ module.exports = (sequelize, DataTypes) => {
         foreignKey: 'user_id',
         as: 'profile' // Para magamit mo: user.profile
       });
+      this.hasMany(models.Schedule, {
+        foreignKey: 'user_id',
+        as: 'schedule'
+      });
     }
   }
 

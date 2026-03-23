@@ -1,5 +1,5 @@
 'use strict';
-const { Schedule, ScheduleParticipant, Position, Region, Province, Cluster, Office, sequelize } = require('../models');
+const { Schedule, ScheduleParticipant, Position, Region, Province, Cluster, Office, sequelize, User } = require('../models');
 const { Op } = require('sequelize');
 const fs = require('fs');
 const path = require('path');
@@ -136,13 +136,28 @@ const formatConflictMessages = async (conflicts) => {
 
 module.exports = {
     // POST: createSchedule
-    async createSched(req, res) {
+        async createSched(req, res) {
         const t = await sequelize.transaction();
         try {
-            const { host_name, event_title, selectedPositions, start_date, end_date, start_time, end_time } = req.body;
+            // 1. Kunin ang user_id mula sa auth middleware
+            const userId = req.user.id; 
 
+            // Inalis na natin ang host_name at host_division sa destructuring
+            const { 
+                event_title, 
+                selectedPositions, 
+                start_date, 
+                end_date, 
+                start_time, 
+                end_time,
+                ...otherData 
+            } = req.body;
+
+            // 2. Conflict Detection
             if (selectedPositions) {
-                const conflicts = await findConflicts(selectedPositions, start_date, end_date, start_time, end_time);
+                const positions = typeof selectedPositions === 'string' ? JSON.parse(selectedPositions) : selectedPositions;
+                const conflicts = await findConflicts(positions, start_date, end_date, start_time, end_time);
+                
                 if (conflicts.length > 0) {
                     if (req.file) fs.unlinkSync(req.file.path);
                     await t.rollback();
@@ -155,19 +170,38 @@ module.exports = {
                 }
             }
 
+            // 3. File Attachment Handling
             let attachmentFile = null, attachmentPath = null;
             if (req.file) {
-                const newFileName = `${host_name.replace(/\s+/g, '_')}_${Date.now()}${path.extname(req.file.originalname)}`;
+                // Dahil wala na tayong host_name sa body, gagamit tayo ng generic prefix o user_id
+                const newFileName = `user_${userId}_${Date.now()}${path.extname(req.file.originalname)}`;
                 const dir = path.join(__dirname, '..', 'uploads', 'schedules');
+                
                 if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+                
                 const targetPath = path.join(dir, newFileName);
                 fs.renameSync(req.file.path, targetPath);
+                
                 attachmentFile = req.file.originalname;
                 attachmentPath = `/uploads/schedules/${newFileName}`;
             }
 
-            const schedule = await Schedule.create({ ...req.body, status: 'Tentative', attachment_file: attachmentFile, attachment_path: attachmentPath }, { transaction: t });
+            // 4. Create Schedule Record
+            // Idinagdag ang user_id at status, tinanggal ang reliance sa host_name/office
+            const schedule = await Schedule.create({ 
+                ...otherData,
+                user_id: userId, // Eto ang importante
+                event_title,
+                start_date,
+                end_date,
+                start_time,
+                end_time,
+                status: 'Tentative', 
+                attachment_file: attachmentFile, 
+                attachment_path: attachmentPath 
+            }, { transaction: t });
 
+            // 5. Create Participants
             if (selectedPositions) {
                 const positions = typeof selectedPositions === 'string' ? JSON.parse(selectedPositions) : selectedPositions;
                 await ScheduleParticipant.bulkCreate(positions.map(p => ({
@@ -181,9 +215,11 @@ module.exports = {
 
             await t.commit();
             return res.status(201).json(schedule);
+
         } catch (err) {
             if (t && !t.finished) await t.rollback();
-            if (req.file) fs.unlinkSync(req.file.path);
+            if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+            console.error(err);
             return res.status(400).json({ error: err.message });
         }
     },
@@ -268,21 +304,30 @@ module.exports = {
 async getAllSched(req, res) {
     try {
         const data = await Schedule.findAll({
-            include: [{ 
-                model: ScheduleParticipant, 
-                as: 'schedule_participants', 
-                required: false,
-                include: [{ model: Position, as: 'designation' }] 
-            }],
+            include: [
+                {
+                    model: User,
+                    as: 'user', // Ito ang alias sa model mo
+                    attributes: ['name'] 
+                },
+                { 
+                    model: ScheduleParticipant, 
+                    as: 'schedule_participants', 
+                    required: false,
+                    include: [{ model: Position, as: 'designation' }] 
+                }
+            ],
             order: [['start_date', 'DESC'], ['start_time', 'DESC']]
         });
 
-        // Paggamit ng map na may Promise.all para sigurado ang async-await
         const formattedData = await Promise.all(data.map(async (sched) => {
             const plainSched = sched.get({ plain: true });
 
-            // Kunin ang participants mula sa association (underscored format)
+            // Automatic host_name assignment gamit ang tamang alias ('user')
+            plainSched.host_name = plainSched.user?.name || "Unknown User";
+
             const sourceParticipants = plainSched.schedule_participants || [];
+            plainSched.participantDetails = [];
 
             if (sourceParticipants.length > 0) {
                 plainSched.participantDetails = await Promise.all(sourceParticipants.map(async (p) => {
@@ -292,15 +337,12 @@ async getAllSched(req, res) {
                     if (p.is_all) {
                         locationName = "(All)";
                     } else {
-                        // Switch logic para makuha ang actual names mula sa tables
                         switch (type) {
                             case 'region':
                                 const reg = await Region.findByPk(p.target_id);
                                 locationName = reg ? `(${reg.region})` : "";
                                 break;
-                            case 'province':
-                            case 'prov':
-                            case 'district':
+                            case 'province': case 'prov': case 'district':
                                 const prov = await Province.findByPk(p.target_id);
                                 locationName = prov ? `(${prov.name})` : "";
                                 break;
@@ -323,15 +365,12 @@ async getAllSched(req, res) {
                         location: locationName
                     };
                 }));
-            } else {
-                plainSched.participantDetails = [];
             }
 
-            // Linisin ang output
+            // Linisin ang lumang association fields
             delete plainSched.schedule_participants; 
-            // Iniiwasan nating malito sa lumang "participants" string field
-            // delete plainSched.participants; 
-
+            // Iniiwan natin ang plainSched.user para sa frontend backup
+            
             return plainSched;
         }));
 
@@ -342,21 +381,30 @@ async getAllSched(req, res) {
     }
 },
 
-    async getSchedById(req, res) {
+ async getSchedById(req, res) {
     try {
         const data = await Schedule.findByPk(req.params.id, {
-            include: [{ 
-                model: ScheduleParticipant, 
-                as: 'schedule_participants', 
-                include: [{ model: Position, as: 'designation' }] 
-            }]
+            include: [
+                {
+                    model: User,
+                    as: 'user',
+                    attributes: ['name']
+                },
+                { 
+                    model: ScheduleParticipant, 
+                    as: 'schedule_participants', 
+                    include: [{ model: Position, as: 'designation' }] 
+                }
+            ]
         });
 
         if (!data) return res.status(404).json({ error: 'Not found' });
 
         const plainSched = data.get({ plain: true });
+        
+        // Gamitin ang 'user' alias
+        plainSched.host_name = plainSched.user?.name || "Unknown User";
 
-        // Gawin nating readable ang listahan ng participants
         if (plainSched.schedule_participants) {
             plainSched.formattedParticipants = await Promise.all(plainSched.schedule_participants.map(async (p) => {
                 let locationName = "";
@@ -370,9 +418,7 @@ async getAllSched(req, res) {
                             const reg = await Region.findByPk(p.target_id);
                             locationName = reg ? `(${reg.region})` : "";
                             break;
-                        case 'province':
-                        case 'prov':
-                        case 'district':
+                        case 'province': case 'prov': case 'district':
                             const prov = await Province.findByPk(p.target_id);
                             locationName = prov ? `(${prov.name})` : "";
                             break;
@@ -384,6 +430,8 @@ async getAllSched(req, res) {
                             const clus = await Cluster.findByPk(p.target_id);
                             locationName = clus ? `(${clus.name})` : "";
                             break;
+                        default:
+                            locationName = "";
                     }
                 }
                 return {
@@ -396,8 +444,7 @@ async getAllSched(req, res) {
             }));
         }
 
-        // Tanggalin ang luma at redundant na field
-        delete plainSched.participants;
+        delete plainSched.schedule_participants;
 
         return res.status(200).json(plainSched);
     } catch (err) { 

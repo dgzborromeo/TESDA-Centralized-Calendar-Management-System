@@ -12,19 +12,12 @@ module.exports = (sequelize, DataTypes) => {
         foreignKey: 'schedule_id',
         as: 'schedule_participants'
       });
+      this.belongsTo(models.User, { foreignKey: 'user_id', as: 'user' });
     }
   }
 
   Schedule.init({
-    // Siguraduhing tugma ang types dito sa migration
-    host_name: {
-      type: DataTypes.STRING,
-      allowNull: false
-    },
-    host_division: {
-      type: DataTypes.STRING,
-      allowNull: true
-    },
+    user_id: DataTypes.INTEGER,
     event_title: {
       type: DataTypes.TEXT,
       allowNull: true

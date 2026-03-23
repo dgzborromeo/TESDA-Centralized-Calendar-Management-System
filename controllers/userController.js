@@ -89,48 +89,67 @@ async updateUser(req, res) {
             cluster, region, province_district, office, division 
         } = req.body;
 
+        // 1. Hanapin ang User
         const user = await User.findByPk(id);
         if (!user) return res.status(404).json({ error: 'User not found' });
 
-        // 1. Update User account
+        // 2. Update User Account logic
         const userUpdateData = { name, email, role };
+        
+        // Hash password lang kung may binigay na bago
         if (password && String(password).trim() !== "") {
-            userUpdateData.password = await bcrypt.hash(password, 10);
+            const salt = await bcrypt.genSalt(10);
+            userUpdateData.password = await bcrypt.hash(password, salt);
         }
+        
         await user.update(userUpdateData);
 
-        // 2. Update or Create Profile (Para sigurado kung sakaling walang profile record)
+        // 3. Ihanda ang Profile Data
         const profileData = {
-            user_id: id, // Required for upsert logic
+            user_id: id, 
             first_name,
             last_name,
             middle_name: middle_name || null,
             designation: designation || null,
-            designation_id: designation_id || null,
             phone_number: phone_number || null,
-            cluster_id: cluster_id || null,
-            region_id: region_id || null,
-            province_id: province_id || null,
-            office_id: office_id || null,
             cluster: cluster || null,
             region: region || null,
             province_district: province_district || null,
             office: office || null,
-            division: division || null
+            division: division || null,
+            // Siguraduhing integers ang IDs kung may value
+            designation_id: designation_id ? parseInt(designation_id) : null,
+            cluster_id: cluster_id ? parseInt(cluster_id) : null,
+            region_id: region_id ? parseInt(region_id) : null,
+            province_id: province_id ? parseInt(province_id) : null,
+            office_id: office_id ? parseInt(office_id) : null,
         };
 
-        // Gagamit tayo ng update kung existing, pero pwede ring UserProfile.upsert(profileData)
-        // Pero base sa code mo, update ang gamit natin:
-        await UserProfile.update(profileData, {
-            where: { user_id: id }
+        /**
+         * 4. UPDATE OR CREATE (UPSERT LOGIC)
+         * Hahanapin ang profile gamit ang user_id. 
+         * Kung meron, i-update. Kung wala, gagawa ng bago.
+         */
+        const [profile, created] = await UserProfile.findOrCreate({
+            where: { user_id: id },
+            defaults: profileData
         });
 
-        return res.json({ message: "User and Profile updated successfully" });
+        if (!created) {
+            // Kung hindi "created", ibig sabihin existing na siya, kaya "update" ang gagawin
+            await profile.update(profileData);
+        }
+
+        return res.json({ 
+            message: created ? "User updated and new Profile created" : "User and Profile updated successfully",
+            status: "success"
+        });
+
     } catch (err) {
         if (err.name === 'SequelizeUniqueConstraintError') {
             return res.status(400).json({ error: "Email is already taken." });
         }
-        console.error(err);
+        console.error("Update Error:", err);
         return res.status(500).json({ error: err.message });
     }
 }
