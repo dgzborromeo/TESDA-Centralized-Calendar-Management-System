@@ -3,6 +3,7 @@ const { Op } = require('sequelize');
 const path = require('path');
 const fs = require('fs'); 
 const office = require('../models/office');
+const db = require('../config/db');
 module.exports = {
   // 1. CREATE - Magdagdag ng bagong Office
 async create(req, res) {
@@ -786,9 +787,11 @@ async getClusters(req, res) {
         return res.status(404).json({ error: 'Schedule not found' });
       }
 
+      const previousStatus = schedule.status;
+
       // 1. Prepare base filename para sa bagong file kung meron
-      const cleanHost = (host_name || schedule.host_name).replace(/\s+/g, '_');
-      const cleanTitle = (event_title || schedule.event_title).replace(/\s+/g, '_').substring(0, 20);
+      const cleanHost = (host_name || schedule.host_name || 'NoHost').replace(/\s+/g, '_');
+      const cleanTitle = (event_title || schedule.event_title || 'NoTitle').replace(/\s+/g, '_').substring(0, 20);
       const baseFileName = `${cleanHost}_${cleanTitle}_${Date.now()}`;
 
       let attachmentFile = schedule.attachment_file;
@@ -796,7 +799,6 @@ async getClusters(req, res) {
 
       // 2. Kung may bagong in-upload na file
       if (req.file) {
-        // BURAHIN ANG LUMANG FILE (Logic base sa Profile mo)
         if (schedule.attachment_path) {
           const oldPath = path.join(__dirname, '..', schedule.attachment_path);
           if (fs.existsSync(oldPath)) {
@@ -820,6 +822,79 @@ async getClusters(req, res) {
         attachment_file: attachmentFile,
         attachment_path: attachmentPath
       });
+
+      // 4. Kung Tentative → Final, i-promote sa events table
+      const newStatus = req.body.status || schedule.status;
+      if (previousStatus !== 'Final' && newStatus === 'Final') {
+        try {
+          const s = await Schedule.findByPk(id);
+          const startDate = s.start_date ? String(s.start_date).slice(0, 10) : null;
+          const endDate = s.end_date ? String(s.end_date).slice(0, 10) : null;
+
+          if (startDate && s.start_time && s.end_time) {
+            const hostUser = s.user_id ? await User.findByPk(s.user_id, { attributes: ['id', 'email'] }) : null;
+            const { assignedOfficeColor } = require('../utils/specialUsers');
+            const eventColor = hostUser ? assignedOfficeColor(hostUser) : '#4f6d8a';
+            const createdBy = s.user_id || 1;
+
+            // Build participant labels from schedule_participants
+            const { ScheduleParticipant, Position: Pos } = require('../models');
+            const parts = await ScheduleParticipant.findAll({
+              where: { schedule_id: s.id },
+              include: [{ model: Pos, as: 'designation' }]
+            });
+
+            const rdNames = [], pdNames = [], edNames = [], allNames = [];
+            for (const p of parts) {
+              const posName = p.designation?.name || '';
+              const posLower = posName.toLowerCase();
+              const targetType = p.target_type ? String(p.target_type).toLowerCase().trim() : '';
+              const targetId = p.target_id;
+              const isAll = p.is_all;
+              let locationName = '';
+              if (isAll) {
+                locationName = '(All)';
+              } else if (targetId) {
+                switch (targetType) {
+                  case 'region': { const [r] = await db.query('SELECT region FROM regions WHERE id = ? LIMIT 1', [targetId]); locationName = r[0] ? `(${r[0].region})` : ''; break; }
+                  case 'province': case 'prov': case 'district': { const [r] = await db.query('SELECT name FROM provinces WHERE id = ? LIMIT 1', [targetId]); locationName = r[0] ? `(${r[0].name})` : ''; break; }
+                  case 'office': { const [r] = await db.query('SELECT name, abbr FROM offices WHERE id = ? LIMIT 1', [targetId]); locationName = r[0] ? `(${r[0].abbr || r[0].name})` : ''; break; }
+                  case 'cluster': { const [r] = await db.query('SELECT name FROM clusters WHERE id = ? LIMIT 1', [targetId]); locationName = r[0] ? `(${r[0].name})` : ''; break; }
+                  default: locationName = targetType ? `(${targetType.toUpperCase()})` : '';
+                }
+              }
+              const label = locationName ? `${posName} ${locationName}` : posName;
+              allNames.push(label);
+              if (posLower.includes('regional director')) rdNames.push(isAll ? 'All RDs' : label);
+              else if (posLower.includes('provincial director') || posLower.includes('district director')) pdNames.push(isAll ? 'All PDs' : label);
+              else if (posLower.includes('executive director')) edNames.push(isAll ? 'All EDs' : label);
+            }
+
+            const [result] = await db.query(
+              `INSERT INTO events (title, type, date, end_date, start_time, end_time, location, description, participants, regional_directors_label, provincial_directors_label, executive_directors_label, color, created_by, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+              [
+                s.event_title || 'Untitled Activity',
+                'meeting',
+                startDate,
+                endDate && endDate !== startDate ? endDate : null,
+                s.start_time,
+                s.end_time,
+                s.location || null,
+                s.description || null,
+                allNames.length ? allNames.join(', ') : null,
+                rdNames.length ? rdNames.join(', ') : null,
+                pdNames.length ? pdNames.join(', ') : null,
+                edNames.length ? edNames.join(', ') : null,
+                eventColor,
+                createdBy,
+              ]
+            );
+          }
+        } catch (eventErr) {
+          console.error('Failed to promote schedule to calendar:', eventErr.message);
+        }
+      }
 
       return res.status(200).json(schedule);
     } catch (err) {

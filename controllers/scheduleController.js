@@ -3,6 +3,112 @@ const { Schedule, ScheduleParticipant, Position, Region, Province, Cluster, Offi
 const { Op } = require('sequelize');
 const fs = require('fs');
 const path = require('path');
+const db = require('../config/db');
+
+/**
+ * Resolve schedule_participants → array of user_ids from user_profiles (best-effort)
+ */
+async function resolveParticipantUserIds(scheduleId) {
+  const participants = await ScheduleParticipant.findAll({ where: { schedule_id: scheduleId } });
+  if (!participants.length) return [];
+  const userIds = new Set();
+  for (const p of participants) {
+    const desigId = p.designation_id;
+    const targetType = p.target_type ? String(p.target_type).toLowerCase().trim() : '';
+    const targetId = p.target_id;
+    const isAll = p.is_all;
+    let whereClause = 'up.designation_id = ?';
+    const params = [desigId];
+    if (!isAll && targetId) {
+      switch (targetType) {
+        case 'region': whereClause += ' AND up.region_id = ?'; params.push(targetId); break;
+        case 'province': case 'prov': case 'district': whereClause += ' AND up.province_id = ?'; params.push(targetId); break;
+        case 'office': whereClause += ' AND up.office_id = ?'; params.push(targetId); break;
+        case 'cluster': whereClause += ' AND up.cluster_id = ?'; params.push(targetId); break;
+        default: break;
+      }
+    }
+    const [rows] = await db.query(`SELECT up.user_id FROM user_profiles up WHERE ${whereClause}`, params);
+    rows.forEach(r => userIds.add(r.user_id));
+  }
+  return Array.from(userIds);
+}
+
+/**
+ * Resolve schedule_participants → label strings for regional/provincial/executive directors
+ * Returns { rdLabel, pdLabel, edLabel, participantsText }
+ */
+async function resolveParticipantLabels(scheduleId) {
+  const participants = await ScheduleParticipant.findAll({
+    where: { schedule_id: scheduleId },
+    include: [{ model: Position, as: 'designation' }]
+  });
+  if (!participants.length) return { rdLabel: null, pdLabel: null, edLabel: null, participantsText: null };
+
+  const rdNames = [];
+  const pdNames = [];
+  const edNames = [];
+  const allNames = [];
+
+  for (const p of participants) {
+    const posName = p.designation?.name || '';
+    const posLower = posName.toLowerCase();
+    const targetType = p.target_type ? String(p.target_type).toLowerCase().trim() : '';
+    const targetId = p.target_id;
+    const isAll = p.is_all;
+
+    let locationName = '';
+    if (isAll) {
+      locationName = '(All)';
+    } else if (targetId) {
+      switch (targetType) {
+        case 'region': {
+          const [rows] = await db.query('SELECT region FROM regions WHERE id = ? LIMIT 1', [targetId]);
+          locationName = rows[0] ? `(${rows[0].region})` : '';
+          break;
+        }
+        case 'province': case 'prov': case 'district': {
+          const [rows] = await db.query('SELECT name FROM provinces WHERE id = ? LIMIT 1', [targetId]);
+          locationName = rows[0] ? `(${rows[0].name})` : '';
+          break;
+        }
+        case 'office': {
+          const [rows] = await db.query('SELECT name, abbr FROM offices WHERE id = ? LIMIT 1', [targetId]);
+          locationName = rows[0] ? `(${rows[0].abbr || rows[0].name})` : '';
+          break;
+        }
+        case 'cluster': {
+          const [rows] = await db.query('SELECT name FROM clusters WHERE id = ? LIMIT 1', [targetId]);
+          locationName = rows[0] ? `(${rows[0].name})` : '';
+          break;
+        }
+        default:
+          locationName = targetType ? `(${targetType.toUpperCase()})` : '';
+      }
+    }
+
+    const label = locationName ? `${posName} ${locationName}` : posName;
+    allNames.push(label);
+
+    if (posLower.includes('regional director')) {
+      if (isAll) rdNames.push('All RDs');
+      else rdNames.push(label);
+    } else if (posLower.includes('provincial director') || posLower.includes('district director')) {
+      if (isAll) pdNames.push('All PDs');
+      else pdNames.push(label);
+    } else if (posLower.includes('executive director')) {
+      if (isAll) edNames.push('All EDs');
+      else edNames.push(label);
+    }
+  }
+
+  return {
+    rdLabel: rdNames.length ? rdNames.join(', ') : null,
+    pdLabel: pdNames.length ? pdNames.join(', ') : null,
+    edLabel: edNames.length ? edNames.join(', ') : null,
+    participantsText: allNames.length ? allNames.join(', ') : null,
+  };
+}
 
 /**
  * HELPER: findConflicts
@@ -195,7 +301,7 @@ module.exports = {
                     return res.status(409).json({ 
                         error: "Schedule Conflict Detected", 
                         conflicts: [...new Set(details)],
-                        message: "Would you like to: (a) Change the participants or (b) Change the date/time of your activity?"
+                        message: "Please select a time after the conflicting event ends."
                     });
                 }
             }
@@ -285,6 +391,7 @@ module.exports = {
             }
 
             let attachmentFile = schedule.attachment_file, attachmentPath = schedule.attachment_path;
+            const previousStatus = schedule.status; // Capture bago mag-update
             if (req.file) {
                 const newFileName = `UPDATED_${Date.now()}${path.extname(req.file.originalname)}`;
                 const targetPath = path.join(__dirname, '..', 'uploads', 'schedules', newFileName);
@@ -312,6 +419,58 @@ module.exports = {
             }
 
             await t.commit();
+
+            // Kung Tentative → Final, i-promote sa events table
+            const newStatus = req.body.status;
+            if (newStatus === 'Final' && previousStatus !== 'Final') {
+              try {
+                const s = await Schedule.findByPk(id);
+                const startDate = s.start_date ? String(s.start_date).slice(0, 10) : null;
+                const endDate = s.end_date ? String(s.end_date).slice(0, 10) : null;
+
+                if (startDate && s.start_time && s.end_time) {
+                  const hostUser = s.user_id ? await User.findByPk(s.user_id, { attributes: ['id', 'email'] }) : null;
+                  const { assignedOfficeColor } = require('../utils/specialUsers');
+                  const eventColor = hostUser ? assignedOfficeColor(hostUser) : '#4f6d8a';
+                  const createdBy = s.user_id || 1;
+
+                  // Build participant labels from schedule_participants
+                  const { rdLabel, pdLabel, edLabel, participantsText } = await resolveParticipantLabels(id);
+
+                  const [result] = await db.query(
+                    `INSERT INTO events (title, type, date, end_date, start_time, end_time, location, description, participants, regional_directors_label, provincial_directors_label, executive_directors_label, color, created_by, created_at, updated_at)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+                    [
+                      s.event_title || 'Untitled Activity',
+                      'meeting',
+                      startDate,
+                      endDate && endDate !== startDate ? endDate : null,
+                      s.start_time,
+                      s.end_time,
+                      s.location || null,
+                      s.description || null,
+                      participantsText,
+                      rdLabel,
+                      pdLabel,
+                      edLabel,
+                      eventColor,
+                      createdBy,
+                    ]
+                  );
+
+                  // Also try to match actual users via user_profiles for event_attendees
+                  const eventId = result.insertId;
+                  const participantUserIds = await resolveParticipantUserIds(id);
+                  for (const uid of participantUserIds) {
+                    await db.query('INSERT IGNORE INTO event_attendees (event_id, user_id) VALUES (?, ?)', [eventId, uid]);
+                    await db.query(`INSERT IGNORE INTO event_rsvps (event_id, office_user_id, status) VALUES (?, ?, 'pending')`, [eventId, uid]);
+                  }
+                }
+              } catch (eventErr) {
+                console.error('Failed to promote schedule to calendar:', eventErr.message);
+              }
+            }
+
             return res.status(200).json(schedule);
         } catch (err) {
             if (t && !t.finished) await t.rollback();
