@@ -81,6 +81,7 @@ router.post('/check-schedule-conflict', scheduleController.checkConflict);
 router.post('/add-schedule', auth, uploadSchedule.single('attachment_file'), scheduleController.createSched);
 router.post('/update-schedule/:id', uploadSchedule.single('attachment_file'), scheduleController.updateSched);
 router.delete('/delete-schedule/:id', scheduleController.deleteSched);
+router.post('/renew-schedule/:id', auth, scheduleController.renewSched);
 
 router.get('/users', auth, userController.getAllUsers);
 router.post('/users', userController.createUser);

@@ -490,13 +490,33 @@ module.exports = {
         } catch (err) { return res.status(500).json({ error: err.message }); }
     },
 
+    // POST: renewSched — reset Expired back to Tentative, refresh created_at
+    async renewSched(req, res) {
+        try {
+            const schedule = await Schedule.findByPk(req.params.id);
+            if (!schedule) return res.status(404).json({ error: 'Schedule not found' });
+            if (schedule.status !== 'Expired') {
+                return res.status(400).json({ error: 'Only Expired schedules can be renewed.' });
+            }
+            // Use raw query to update both status and created_at (reset the 5-day clock)
+            await db.query(
+                'UPDATE schedules SET status = ?, created_at = NOW() WHERE id = ?',
+                ['Tentative', req.params.id]
+            );
+            const updated = await Schedule.findByPk(req.params.id);
+            return res.status(200).json({ message: 'Schedule renewed successfully.', schedule: updated });
+        } catch (err) {
+            return res.status(500).json({ error: err.message });
+        }
+    },
+
 async getAllSched(req, res) {
     try {
         const data = await Schedule.findAll({
             include: [
                 {
                     model: User,
-                    as: 'user', // Ito ang alias sa model mo
+                    as: 'user',
                     attributes: ['name'] 
                 },
                 { 
@@ -509,11 +529,38 @@ async getAllSched(req, res) {
             order: [['start_date', 'DESC'], ['start_time', 'DESC']]
         });
 
+        const now = new Date();
+        const EXPIRE_DAYS = 5;
+        const WARN_DAYS = 3;
+
+        // Auto-expire tentative schedules that are 5+ days old
+        const toExpire = data.filter(s => {
+            if (s.status !== 'Tentative') return false;
+            const created = new Date(s.createdAt);
+            const diffDays = (now - created) / (1000 * 60 * 60 * 24);
+            return diffDays >= EXPIRE_DAYS;
+        });
+        if (toExpire.length > 0) {
+            await Schedule.update(
+                { status: 'Expired' },
+                { where: { id: toExpire.map(s => s.id) } }
+            );
+            toExpire.forEach(s => { s.status = 'Expired'; });
+        }
+
         const formattedData = await Promise.all(data.map(async (sched) => {
             const plainSched = sched.get({ plain: true });
 
-            // Automatic host_name assignment gamit ang tamang alias ('user')
             plainSched.host_name = plainSched.user?.name || "Unknown User";
+
+            // Compute days as tentative and warning flag
+            const created = new Date(plainSched.createdAt);
+            const diffDays = (now - created) / (1000 * 60 * 60 * 24);
+            plainSched.days_as_tentative = Math.floor(diffDays);
+            plainSched.expiry_warning = plainSched.status === 'Tentative' && diffDays >= WARN_DAYS;
+            plainSched.days_until_expiry = plainSched.status === 'Tentative'
+                ? Math.max(0, Math.ceil(EXPIRE_DAYS - diffDays))
+                : null;
 
             const sourceParticipants = plainSched.schedule_participants || [];
             plainSched.participantDetails = [];
