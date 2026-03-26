@@ -420,8 +420,15 @@ module.exports = {
 
             await t.commit();
 
-            // Kung Tentative → Final, i-promote sa events table
+            // Determine new status once
             const newStatus = req.body.status;
+
+            // Kung Expired → Tentative, i-reset ang created_at para magsimula ulit ang 5-day clock
+            if (newStatus === 'Tentative' && previousStatus === 'Expired') {
+                await db.query('UPDATE schedules SET created_at = NOW() WHERE id = ?', [id]);
+            }
+
+            // Kung Tentative → Final, i-promote sa events table
             if (newStatus === 'Final' && previousStatus !== 'Final') {
               try {
                 const s = await Schedule.findByPk(id);
