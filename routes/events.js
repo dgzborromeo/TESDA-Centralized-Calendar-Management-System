@@ -813,8 +813,9 @@ router.post('/:id/post-document', upload.single('attachment'), async (req, res) 
     if (String(event.status || 'active') === 'cancelled') {
       return res.status(400).json({ error: 'Cannot upload post-event document for a cancelled event.' });
     }
-    if (Number(event.created_by) !== Number(req.user.id)) {
-      return res.status(403).json({ error: 'Only the event host can upload this required document.' });
+    const isAdminPostDoc = req.user?.role === 'admin';
+    if (!isAdminPostDoc && Number(event.created_by) !== Number(req.user?.id)) {
+      return res.status(403).json({ error: 'Only the event host or an admin can upload this required document.' });
     }
     if (!isEventDoneRecord(event)) {
       return res.status(400).json({ error: 'Post-event document can only be uploaded once the event is done.' });
@@ -852,8 +853,10 @@ router.post('/:id/supporting-document', upload.single('attachment'), async (req,
     if (String(event.status || 'active') === 'cancelled') {
       return res.status(400).json({ error: 'Cannot upload supporting documents for a cancelled event.' });
     }
-    if (Number(event.created_by) !== Number(req.user.id)) {
-      return res.status(403).json({ error: 'Only the event host can upload this document.' });
+    // Allow admin or the event creator to upload
+    const isAdmin = req.user?.role === 'admin';
+    if (!isAdmin && Number(event.created_by) !== Number(req.user?.id)) {
+      return res.status(403).json({ error: 'Only the event host or an admin can upload this document.' });
     }
     if (!isEventDoneRecord(event)) {
       return res.status(400).json({ error: 'Supporting documents can only be uploaded once the event is done.' });
