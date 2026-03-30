@@ -18,6 +18,11 @@ module.exports = (sequelize, DataTypes) => {
         foreignKey: 'designation_id',
         as: 'designation'
       });
+      this.belongsTo(models.Region, { foreignKey: 'target_id', constraints: false, as: 'region' });
+      this.belongsTo(models.Province, { foreignKey: 'target_id', constraints: false, as: 'province' });
+      this.belongsTo(models.Office, { foreignKey: 'target_id', constraints: false, as: 'office' });
+      this.belongsTo(models.Cluster, { foreignKey: 'target_id', constraints: false, as: 'cluster' });
+      this.belongsTo(models.TTI, { foreignKey: 'target_id', constraints: false, as: 'tti' });
     }
   }
   ScheduleParticipant.init({

@@ -98,4 +98,12 @@ router.delete('/focalship/:id', configController.deleteFocalship);   // Delete
 router.get('/regions', configController.getAllRegions);
 router.get('/provinces/:region_id', configController.getByRegion);
 router.get('/provinces', configController.getAllProvinces);   
+
+//tti
+router.get('/ttis', configController.getAllTTIs);
+router.get('/ttis/:id', configController.getOneTTI);
+router.post('/ttis', configController.createTTI);
+router.put('/ttis/:id', configController.updateTTI);
+router.delete('/ttis/:id', configController.deleteTTI);
+router.get('/provinces/:province_id/ttis', configController.getByProvince);
 module.exports = router;

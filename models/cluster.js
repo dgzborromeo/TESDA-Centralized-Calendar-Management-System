@@ -15,6 +15,12 @@ module.exports = (sequelize, DataTypes) => {
     as: 'office' 
   });
   this.hasMany(models.UserProfile, { foreignKey: 'cluster_id', as: 'user_profile' });
+  this.hasMany(models.ScheduleParticipant, {
+    foreignKey: 'target_id',
+    constraints: false,
+    scope: { target_type: 'cluster' },
+    as: 'participants'
+  });
     }
   }
   Cluster.init({

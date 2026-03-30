@@ -10,6 +10,7 @@ module.exports = (sequelize, DataTypes) => {
       this.belongsTo(models.Province, { foreignKey: 'province_id', as: 'province_data' });
       this.belongsTo(models.Office, { foreignKey: 'office_id', as: 'office_data' });
       this.belongsTo(models.Position, { foreignKey: 'designation_id', as: 'position' });
+      this.belongsTo(models.TTI, { foreignKey: 'tti_id', as: 'tti' });
     }
     
   }
@@ -20,6 +21,8 @@ module.exports = (sequelize, DataTypes) => {
     province_id: DataTypes.INTEGER,
     office_id: DataTypes.INTEGER,
     designation_id: DataTypes.INTEGER,
+    tti_id: DataTypes.INTEGER,
+    tti_name: DataTypes.STRING,
     first_name: DataTypes.STRING,
     middle_name: DataTypes.STRING,
     last_name: DataTypes.STRING,

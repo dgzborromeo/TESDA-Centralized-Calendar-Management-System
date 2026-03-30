@@ -1,4 +1,4 @@
-const { Category, Focal, ConfigPosition, Office, Division, Position, Cluster, ClusterOffice, User, Schedule, Focalship, Region, Province } = require('../models');
+const { Category, Focal, ConfigPosition, Office, Division, Position, Cluster, ClusterOffice, User, Schedule, Focalship, Region, Province, TTI } = require('../models');
 const { Op } = require('sequelize');
 const path = require('path');
 const fs = require('fs'); 
@@ -1034,8 +1034,127 @@ async getClusters(req, res) {
     } catch (error) {
       return res.status(500).json({ error: error.message });
     }
-  }
+  },
 
+  //TTI
+  async createTTI(req, res) {
+    try {
+      const { province_id, name, classification, address, email } = req.body;
+      
+      // Validation: Province ID and Name are essential
+      if (!province_id || !name) {
+        return res.status(400).json({ error: "Province ID and Name are required." });
+      }
+
+      const tti = await TTI.create({ 
+        province_id, 
+        name, 
+        classification, 
+        address, 
+        email 
+      });
+      
+      return res.status(201).json(tti);
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  },
+
+  // 2. READ ALL - Kunin lahat ng TTIs kasama ang Province at Region info
+  async getAllTTIs(req, res) {
+    try {
+      const ttis = await TTI.findAll({
+        include: [
+          {
+            model: Province,
+            as: 'province',
+            include: [
+              { model: Region, as: 'region' }
+            ]
+          }
+        ],
+        order: [['id', 'DESC']]
+      });
+      return res.json(ttis);
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  },
+
+  // 3. READ ONE - Specific TTI record
+  async getOneTTI(req, res) {
+    try {
+      const tti = await TTI.findByPk(req.params.id, {
+        include: [
+          {
+            model: Province,
+            as: 'province',
+            include: [{ model: Region, as: 'region' }]
+          }
+        ]
+      });
+
+      if (!tti) {
+        return res.status(404).json({ error: "TTI record not found." });
+      }
+      return res.json(tti);
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  },
+
+  // 4. UPDATE - Baguhin ang info ng TTI
+  async updateTTI(req, res) {
+    try {
+      const { province_id, name, classification, address, email } = req.body;
+      const tti = await TTI.findByPk(req.params.id);
+
+      if (!tti) {
+        return res.status(404).json({ error: "TTI record not found." });
+      }
+
+      await tti.update({ 
+        province_id, 
+        name, 
+        classification, 
+        address, 
+        email 
+      });
+
+      return res.json({ message: "Updated successfully", tti });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  },
+
+  // 5. DELETE - Tanggalin ang TTI
+  async deleteTTI(req, res) {
+    try {
+      const tti = await TTI.findByPk(req.params.id);
+      if (!tti) {
+        return res.status(404).json({ error: "TTI record not found." });
+      }
+
+      await tti.destroy();
+      return res.json({ message: "Deleted successfully" });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  },
+
+  // 6. FILTER BY PROVINCE - Kunin lahat ng TTI sa isang probinsya
+  async getByProvince(req, res) {
+    try {
+      const { province_id } = req.params;
+      const ttis = await TTI.findAll({
+        where: { province_id },
+        order: [['name', 'ASC']]
+      });
+      return res.json(ttis);
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  }
 };
 
 
