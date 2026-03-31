@@ -999,17 +999,6 @@ async getClusters(req, res) {
     }
   },
 
-      async getAllProvinces(req, res) {
-    try {
-      const provinces = await Province.findAll({
-        order: [['id', 'ASC']]
-      });
-      return res.json(provinces);
-    } catch (err) {
-      return res.status(500).json({ error: err.message });
-    }
-  },
-
   async getByRegion(req, res) {
     try {
       const { region_id } = req.params;

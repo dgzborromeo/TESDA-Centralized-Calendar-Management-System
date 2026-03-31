@@ -25,7 +25,8 @@ module.exports = (sequelize, DataTypes) => {
   }
   Province.init({
     region_id: DataTypes.INTEGER,
-    name: DataTypes.STRING
+    name: DataTypes.STRING,
+    direct_flight: DataTypes.BOOLEAN
   }, {
     sequelize,
     modelName: 'Province',

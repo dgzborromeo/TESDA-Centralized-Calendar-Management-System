@@ -32,6 +32,10 @@ module.exports = (sequelize, DataTypes) => {
       allowNull: false,
       defaultValue: 'meeting'
     },
+    is_posted: {
+      type: DataTypes.BOOLEAN, // Saktong DATE lang (YYYY-MM-DD)
+      allowNull: true
+    },
     date: {
       type: DataTypes.DATEONLY, // Saktong DATE lang (YYYY-MM-DD)
       allowNull: false
