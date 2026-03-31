@@ -452,7 +452,7 @@ module.exports = {
             const endDate = schedule.end_date ? String(schedule.end_date).slice(0, 10) : null;
 
             if (startDate && schedule.start_time && schedule.end_time) {
-                const hostUser = schedule.user_id ? await User.findByPk(schedule.user_id, { attributes: ['id'] }) : null;
+                const hostUser = schedule.user_id ? await User.findByPk(schedule.user_id, { attributes: ['id', 'email'] }) : null;
                 const { assignedOfficeColor } = require('../utils/specialUsers');
                 const eventColor = hostUser ? assignedOfficeColor(hostUser) : '#4f6d8a';
 
