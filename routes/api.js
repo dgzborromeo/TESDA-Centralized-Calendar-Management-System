@@ -82,6 +82,7 @@ router.post('/add-schedule', auth, uploadSchedule.single('attachment_file'), sch
 router.post('/update-schedule/:id', uploadSchedule.single('attachment_file'), scheduleController.updateSched);
 router.delete('/delete-schedule/:id', scheduleController.deleteSched);
 router.post('/renew-schedule/:id', auth, scheduleController.renewSched);
+router.post('/schedule-posted/:id', scheduleController.toggleSchedulePosted);
 
 router.get('/users', auth, userController.getAllUsers);
 router.post('/users', userController.createUser);

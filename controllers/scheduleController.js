@@ -458,11 +458,22 @@ module.exports = {
 
                 const { rdLabel, pdLabel, edLabel, participantsText } = await resolveParticipantLabels(id);
 
-                // Gagamit tayo ng raw query gaya ng original mo para sigurado sa fields
+                // Strip [TENTATIVE] prefix from description if present
+                const cleanDescription = (schedule.description || '').replace(/^\[TENTATIVE\]\s*/i, '').trim() || null;
+
+                // Delete ALL existing events with same title + date (tentative or otherwise)
+                // to prevent duplicates before inserting the Final version
+                await db.query(
+                    'DELETE FROM events WHERE title = ? AND date = ?',
+                    [schedule.event_title, startDate],
+                    { transaction: t }
+                );
+
+                // INSERT clean Final event
                 const [result] = await db.query(
-                    `INSERT INTO events (title, type, date, end_date, start_time, end_time, location, description, participants, regional_directors_label, provincial_directors_label, executive_directors_label, color, created_by, created_at, updated_at)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-                    [schedule.event_title, 'meeting', startDate, (endDate !== startDate ? endDate : null), schedule.start_time, schedule.end_time, schedule.location, schedule.description, participantsText, rdLabel, pdLabel, edLabel, eventColor, schedule.user_id || 1],
+                    `INSERT INTO events (title, type, date, end_date, start_time, end_time, location, description, participants, regional_directors_label, provincial_directors_label, executive_directors_label, color, created_by, is_posted, created_at, updated_at)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), NOW())`,
+                    [schedule.event_title, 'meeting', startDate, (endDate && endDate !== startDate ? endDate : null), schedule.start_time, schedule.end_time, schedule.location, cleanDescription, participantsText, rdLabel, pdLabel, edLabel, eventColor, schedule.user_id || 1],
                     { transaction: t }
                 );
 
@@ -630,6 +641,25 @@ async getAllSched(req, res) {
                 is_all: p.is_all,
             }));
 
+            // Lookup promoted event's is_posted if status is Final or Tentative
+            plainSched.promoted_event_id = null;
+            plainSched.is_posted = null;
+            if (plainSched.status === 'Final' || plainSched.status === 'Tentative') {
+                try {
+                    const startDate = plainSched.start_date ? String(plainSched.start_date).slice(0, 10) : null;
+                    if (startDate && plainSched.event_title) {
+                        const [evRows] = await db.query(
+                            'SELECT id, is_posted FROM events WHERE title = ? AND date = ? AND created_by = ? LIMIT 1',
+                            [plainSched.event_title, startDate, plainSched.user_id]
+                        );
+                        if (evRows.length > 0) {
+                            plainSched.promoted_event_id = evRows[0].id;
+                            plainSched.is_posted = evRows[0].is_posted === 1 || evRows[0].is_posted === true;
+                        }
+                    }
+                } catch (_) { /* non-critical */ }
+            }
+
             delete plainSched.schedule_participants;
             return plainSched;
         }));
@@ -714,5 +744,69 @@ async getAllSched(req, res) {
     } catch (err) { 
         return res.status(500).json({ error: err.message }); 
     }
-}
+},
+
+    // PATCH: toggleSchedulePosted — post/unpost a schedule to the calendar
+    async toggleSchedulePosted(req, res) {
+        try {
+            const { id } = req.params;
+            const { is_posted } = req.body;
+            if (typeof is_posted !== 'boolean') return res.status(400).json({ error: 'is_posted must be boolean.' });
+
+            const schedule = await Schedule.findByPk(id);
+            if (!schedule) return res.status(404).json({ error: 'Schedule not found' });
+            if (schedule.status === 'Expired') return res.status(400).json({ error: 'Expired schedules cannot be posted.' });
+
+            const startDate = schedule.start_date ? String(schedule.start_date).slice(0, 10) : null;
+            if (!startDate || !schedule.start_time || !schedule.end_time) {
+                return res.status(400).json({ error: 'Schedule is missing date or time.' });
+            }
+
+            // Find existing promoted event
+            const [existing] = await db.query(
+                'SELECT id FROM events WHERE title = ? AND date = ? AND created_by = ? LIMIT 1',
+                [schedule.event_title, startDate, schedule.user_id]
+            );
+
+            if (existing.length > 0) {
+                // Event exists — just toggle is_posted
+                await db.query('UPDATE events SET is_posted = ? WHERE id = ?', [is_posted ? 1 : 0, existing[0].id]);
+                return res.json({ success: true, is_posted, promoted_event_id: existing[0].id });
+            }
+
+            // No event yet — if posting, create it now (works for both Tentative and Final)
+            if (!is_posted) return res.json({ success: true, is_posted: false, promoted_event_id: null });
+
+            const { assignedOfficeColor } = require('../utils/specialUsers');
+            const hostUser = schedule.user_id ? await User.findByPk(schedule.user_id, { attributes: ['id', 'email'] }) : null;
+            const eventColor = hostUser ? assignedOfficeColor(hostUser) : '#4f6d8a';
+            const endDate = schedule.end_date ? String(schedule.end_date).slice(0, 10) : null;
+            const { rdLabel, pdLabel, edLabel, participantsText } = await resolveParticipantLabels(id);
+
+            // For Tentative, add [TENTATIVE] prefix to description so calendar detects it
+            const eventTitle = schedule.event_title || 'Untitled';
+            const baseDescription = schedule.description || '';
+            const eventDescription = schedule.status === 'Tentative'
+                ? (baseDescription.startsWith('[TENTATIVE]') ? baseDescription : `[TENTATIVE]\n${baseDescription}`.trim())
+                : baseDescription;
+
+            const [result] = await db.query(
+                `INSERT INTO events (title, type, date, end_date, start_time, end_time, location, description, participants, regional_directors_label, provincial_directors_label, executive_directors_label, color, created_by, is_posted, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), NOW())`,
+                [
+                    eventTitle, 'meeting', startDate,
+                    endDate && endDate !== startDate ? endDate : null,
+                    schedule.start_time, schedule.end_time,
+                    schedule.location || null, eventDescription,
+                    participantsText, rdLabel, pdLabel, edLabel,
+                    eventColor, schedule.user_id || 1
+                ]
+            );
+
+            return res.json({ success: true, is_posted: true, promoted_event_id: result.insertId });
+        } catch (err) {
+            console.error('toggleSchedulePosted error:', err);
+            return res.status(500).json({ error: err.message });
+        }
+    }
 };

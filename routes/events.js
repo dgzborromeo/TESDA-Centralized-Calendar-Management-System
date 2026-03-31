@@ -290,6 +290,7 @@ router.get('/', async (req, res) => {
       const like = `%${q.trim()}%`;
       params.push(like, like, like);
     }
+    sql += ' AND e.is_posted = 1';
     sql += ' ORDER BY e.date, e.start_time';
     const [events] = await db.query(sql, params);
     res.json(
@@ -1143,6 +1144,18 @@ router.post('/check-conflict', async (req, res) => {
     res.json({ conflicts: merged });
   } catch (err) {
     res.status(500).json({ error: 'Conflict check failed.' });
+  }
+});
+
+// POST /api/events/:id/posted — toggle is_posted (admin only)
+router.post('/:id/posted', requireAdmin, async (req, res) => {
+  try {
+    const { is_posted } = req.body;
+    if (typeof is_posted !== 'boolean') return res.status(400).json({ error: 'is_posted must be boolean.' });
+    await db.query('UPDATE events SET is_posted = ? WHERE id = ?', [is_posted ? 1 : 0, req.params.id]);
+    res.json({ success: true, is_posted });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

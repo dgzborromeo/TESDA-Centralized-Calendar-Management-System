@@ -870,9 +870,18 @@ async getClusters(req, res) {
               else if (posLower.includes('executive director')) edNames.push(isAll ? 'All EDs' : label);
             }
 
+            // Strip [TENTATIVE] from description if present
+            const cleanDescription = (s.description || '').replace(/^\[TENTATIVE\]\s*/i, '').trim() || null;
+
+            // Delete existing tentative/duplicate events with same title+date, then insert Final
+            await db.query(
+              'DELETE FROM events WHERE title = ? AND date = ?',
+              [s.event_title || 'Untitled Activity', startDate]
+            );
+
             const [result] = await db.query(
-              `INSERT INTO events (title, type, date, end_date, start_time, end_time, location, description, participants, regional_directors_label, provincial_directors_label, executive_directors_label, color, created_by, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+              `INSERT INTO events (title, type, date, end_date, start_time, end_time, location, description, participants, regional_directors_label, provincial_directors_label, executive_directors_label, color, created_by, is_posted, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), NOW())`,
               [
                 s.event_title || 'Untitled Activity',
                 'meeting',
@@ -881,7 +890,7 @@ async getClusters(req, res) {
                 s.start_time,
                 s.end_time,
                 s.location || null,
-                s.description || null,
+                cleanDescription,
                 allNames.length ? allNames.join(', ') : null,
                 rdNames.length ? rdNames.join(', ') : null,
                 pdNames.length ? pdNames.join(', ') : null,
@@ -893,6 +902,25 @@ async getClusters(req, res) {
           }
         } catch (eventErr) {
           console.error('Failed to promote schedule to calendar:', eventErr.message);
+        }
+      }
+
+      // 5. Kung Final → Tentative, i-update yung event sa calendar para maging tentative ulit
+      if (previousStatus === 'Final' && newStatus === 'Tentative') {
+        try {
+          const s = await Schedule.findByPk(id);
+          const startDate = s.start_date ? String(s.start_date).slice(0, 10) : null;
+          if (startDate && s.event_title) {
+            // Add [TENTATIVE] back to description
+            const currentDesc = (s.description || '').replace(/^\[TENTATIVE\]\s*/i, '').trim();
+            const tentativeDesc = currentDesc ? `[TENTATIVE]\n${currentDesc}` : '[TENTATIVE]';
+            await db.query(
+              'UPDATE events SET description = ? WHERE title = ? AND date = ?',
+              [tentativeDesc, s.event_title, startDate]
+            );
+          }
+        } catch (revertErr) {
+          console.error('Failed to revert event to tentative:', revertErr.message);
         }
       }
 
