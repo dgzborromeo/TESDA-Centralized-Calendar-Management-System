@@ -7,9 +7,10 @@ const configController = require('../controllers/configController');
 const userController = require('../controllers/userController');
 const scheduleController = require('../controllers/scheduleController');
 // Import Middlewares
-const { auth } = require('../middleware/auth');
+const { auth, requireAdmin } = require('../middleware/auth');
 const upload = require('../middleware/uploadMiddleware');
 const uploadSchedule = require('../middleware/uploadScheduleMiddleware');
+const dayFlagController = require('../controllers/dayFlagController');
 
 // --- USER PROFILE ROUTES ---
 // Lahat ng profile routes ay dadaan sa auth middleware
@@ -107,4 +108,11 @@ router.post('/ttis', configController.createTTI);
 router.put('/ttis/:id', configController.updateTTI);
 router.delete('/ttis/:id', configController.deleteTTI);
 router.get('/provinces/:province_id/ttis', configController.getByProvince);
+
+// DAY FLAGS (suspended / WFH days) — read: public; write: admin only
+router.get('/day-flags', dayFlagController.list);
+router.post('/day-flags', auth, requireAdmin, dayFlagController.create);
+router.put('/day-flags/:id', auth, requireAdmin, dayFlagController.update);
+router.delete('/day-flags/:id', auth, requireAdmin, dayFlagController.remove);
+
 module.exports = router;
