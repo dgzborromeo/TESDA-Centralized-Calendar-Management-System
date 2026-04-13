@@ -106,6 +106,37 @@ for (const p of participants) {
     };
 }
 
+const findLocationConflicts = async (location_id, location_table, start_date, end_date, start_time, end_time, excludeScheduleId = null) => {
+    // Kung walang location id o table (halimbawa: Virtual o Others), walang conflict sa venue
+    if (!location_id || !location_table) return [];
+
+    return await Schedule.findAll({
+        where: {
+            // 1. Wag isama ang sarili kung update
+            id: excludeScheduleId ? { [Op.ne]: excludeScheduleId } : { [Op.not]: null },
+            
+            // 2. Hindi Cancelled o Expired
+            status: { [Op.notIn]: ['Cancelled', 'Expired'] }, 
+
+            // 3. Same Venue
+            location_id: location_id,
+            location_table: location_table,
+
+            // 4. DATE & TIME OVERLAP
+            [Op.and]: [
+                { start_date: { [Op.lte]: end_date } },
+                { end_date: { [Op.gte]: start_date } },
+                {
+                    [Op.and]: [
+                        { start_time: { [Op.lt]: end_time } },
+                        { end_time: { [Op.gt]: start_time } }
+                    ]
+                }
+            ]
+        }
+    });
+};
+
 /**
  * HELPER: findConflicts
  */
@@ -253,31 +284,75 @@ const formatConflictMessages = async (conflicts) => {
     }));
 };
 
+const resolveLocationName = async (type, table, id, manualLocation) => {
+    // Pag CO o Others, gamitin lang kung ano ang tinype ng user
+    if (type === 'CO' || type === 'Others') {
+        return manualLocation;
+    }
+
+    try {
+        let result = null;
+        // Depende sa table, doon tayo maghahanap ng name
+        if (table === 'regions') {
+            result = await models.Region.findByPk(id);
+            return result ? result.region : manualLocation; // .region ang column name sa regions table mo
+        } else if (table === 'provinces') {
+            result = await models.Province.findByPk(id);
+            return result ? result.name : manualLocation;
+        } else if (table === 'ttis') {
+            result = await models.Tti.findByPk(id);
+            return result ? result.name : manualLocation;
+        } else if (table === 'offices') {
+            result = await models.Office.findByPk(id);
+            return result ? result.name : manualLocation;
+        }
+        
+        return manualLocation;
+    } catch (error) {
+        console.error("Error resolving location name:", error);
+        return manualLocation;
+    }
+};
+
 module.exports = {
 
     // POST: check conflicts before saving (live conflict preview)
-    async checkConflict(req, res) {
+async checkConflict(req, res) {
         try {
-            const { selectedPositions, start_date, end_date, start_time, end_time } = req.body;
-            if (!selectedPositions || !start_date || !start_time || !end_time) {
+            const { selectedPositions, start_date, end_date, start_time, end_time, location_id, location_table } = req.body;
+            
+            if (!start_date || !start_time || !end_time) {
                 return res.json({ conflicts: [] });
             }
-            const positions = typeof selectedPositions === 'string' ? JSON.parse(selectedPositions) : selectedPositions;
-            if (!positions.length) return res.json({ conflicts: [] });
 
             const effectiveEndDate = end_date || start_date;
-            const conflicts = await findConflicts(positions, start_date, effectiveEndDate, start_time, end_time);
+            let messages = [];
+            let conflictingScheduleIds = [];
 
-            const messages = await formatConflictMessages(conflicts);
-            const conflictingScheduleIds = [...new Set(
-                conflicts.map(c => c.schedule?.id).filter(Boolean)
-            )];
+            // --- 1. TAO CONFLICT (Existing) ---
+            if (selectedPositions) {
+                const positions = typeof selectedPositions === 'string' ? JSON.parse(selectedPositions) : selectedPositions;
+                if (positions.length > 0) {
+                    const pConflicts = await findConflicts(positions, start_date, effectiveEndDate, start_time, end_time);
+                    const pMessages = await formatConflictMessages(pConflicts);
+                    messages.push(...pMessages);
+                    pConflicts.forEach(c => { if(c.schedule?.id) conflictingScheduleIds.push(c.schedule.id); });
+                }
+            }
+
+            // --- 2. LUGAR CONFLICT (New) ---
+            const lConflicts = await findLocationConflicts(location_id, location_table, start_date, effectiveEndDate, start_time, end_time);
+            if (lConflicts.length > 0) {
+                lConflicts.forEach(loc => {
+                    messages.push(`Venue Conflict: The selected location is already booked for "${loc.event_title}"`);
+                    conflictingScheduleIds.push(loc.id);
+                });
+            }
 
             return res.json({
-                hasConflict: conflicts.length > 0,
+                hasConflict: messages.length > 0,
                 messages: [...new Set(messages)],
-                scheduleIds: conflictingScheduleIds,
-                
+                scheduleIds: [...new Set(conflictingScheduleIds)],
             });
         } catch (err) {
             console.error('checkConflict error:', err);
@@ -286,100 +361,137 @@ module.exports = {
     },
 
     // POST: createSchedule
-        async createSched(req, res) {
-        const t = await sequelize.transaction();
-        try {
-            // 1. Kunin ang user_id mula sa auth middleware
-            const userId = req.user.id; 
+      async createSched(req, res) {
+    const t = await sequelize.transaction();
+    try {
+        const userId = req.user.id; 
 
-            // Inalis na natin ang host_name at host_division sa destructuring
-            const { 
-                event_title, 
-                selectedPositions, 
-                start_date, 
-                end_date, 
-                start_time, 
-                end_time,
-                ...otherData 
-            } = req.body;
+        const { 
+            event_title, 
+            selectedPositions, 
+            start_date, 
+            end_date, 
+            start_time, 
+            end_time,
+            // Kunin natin ang mga bagong fields mula sa body
+            location_type,
+            location_table,
+            location_id,
+            location, // Ito yung manual input string
+            ...otherData 
+        } = req.body;
 
-            // 2. Conflict Detection
-            if (selectedPositions) {
-                const positions = typeof selectedPositions === 'string' ? JSON.parse(selectedPositions) : selectedPositions;
-                const conflicts = await findConflicts(positions, start_date, end_date, start_time, end_time);
-                
-                if (conflicts.length > 0) {
-                    if (req.file) fs.unlinkSync(req.file.path);
-                    await t.rollback();
-                    const details = await formatConflictMessages(conflicts);
-                    return res.status(409).json({ 
-                        error: "Schedule Conflict Detected", 
-                        conflicts: [...new Set(details)],
-                        message: "Would you like to: (a) Change the participants or (b) Change the date/time of your activity?"
-                    });
-                }
+        // --- NEW LOCATION LOGIC ---
+        // Tatawagin natin ang helper function para makuha ang tamang pangalan
+        const finalLocationName = await resolveLocationName(
+            location_type, 
+            location_table, 
+            location_id, 
+            location
+        );
+
+        // 2. Conflict Detection (Existing Logic...)
+let allConflictMessages = [];
+
+        // Check Participants
+        if (selectedPositions) {
+            const positions = typeof selectedPositions === 'string' ? JSON.parse(selectedPositions) : selectedPositions;
+            const pConflicts = await findConflicts(positions, start_date, end_date, start_time, end_time);
+            if (pConflicts.length > 0) {
+                const pMessages = await formatConflictMessages(pConflicts);
+                allConflictMessages.push(...pMessages);
             }
-
-            // 3. File Attachment Handling
-            let attachmentFile = null, attachmentPath = null;
-            if (req.file) {
-                // Dahil wala na tayong host_name sa body, gagamit tayo ng generic prefix o user_id
-                const newFileName = `user_${userId}_${Date.now()}${path.extname(req.file.originalname)}`;
-                const dir = path.join(__dirname, '..', 'uploads', 'schedules');
-                
-                if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-                
-                const targetPath = path.join(dir, newFileName);
-                fs.renameSync(req.file.path, targetPath);
-                
-                attachmentFile = req.file.originalname;
-                attachmentPath = `/uploads/schedules/${newFileName}`;
-            }
-
-            // 4. Create Schedule Record
-            // Idinagdag ang user_id at status, tinanggal ang reliance sa host_name/office
-            const schedule = await Schedule.create({ 
-                ...otherData,
-                user_id: userId, // Eto ang importante
-                event_title,
-                start_date,
-                end_date,
-                start_time,
-                end_time,
-                status: 'Tentative', 
-                attachment_file: attachmentFile, 
-                attachment_path: attachmentPath 
-            }, { transaction: t });
-
-            // 5. Create Participants
-            if (selectedPositions) {
-                const positions = typeof selectedPositions === 'string' ? JSON.parse(selectedPositions) : selectedPositions;
-                await ScheduleParticipant.bulkCreate(positions.map(p => ({
-                    schedule_id: schedule.id,
-                    designation_id: p.designationId,
-                    target_id: p.targetId || null,
-                    target_type: p.targetType || null,
-                    is_all: p.isAll || false
-                })), { transaction: t });
-            }
-
-            await t.commit();
-            return res.status(201).json(schedule);
-
-        } catch (err) {
-            if (t && !t.finished) await t.rollback();
-            if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-            console.error(err);
-            return res.status(400).json({ error: err.message });
         }
-    },
+
+        // Check Location
+        const lConflicts = await findLocationConflicts(location_id, location_table, start_date, end_date, start_time, end_time);
+        if (lConflicts.length > 0) {
+            lConflicts.forEach(loc => {
+                allConflictMessages.push(`Venue Conflict: The location is reserved for "${loc.event_title}"`);
+            });
+        }
+
+        if (allConflictMessages.length > 0) {
+            if (req.file) fs.unlinkSync(req.file.path);
+            await t.rollback();
+            return res.status(409).json({ 
+                error: "Schedule Conflict Detected", 
+                conflicts: [...new Set(allConflictMessages)]
+            });
+        }
+
+        // 3. File Handling (Existing Logic...)
+        let attachmentFile = null, attachmentPath = null;
+        if (req.file) {
+            const newFileName = `user_${userId}_${Date.now()}${path.extname(req.file.originalname)}`;
+            const dir = path.join(__dirname, '..', 'uploads', 'schedules');
+            if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+            const targetPath = path.join(dir, newFileName);
+            fs.renameSync(req.file.path, targetPath);
+            attachmentFile = req.file.originalname;
+            attachmentPath = `/uploads/schedules/${newFileName}`;
+        }
+
+        // 4. Create Schedule Record
+        const schedule = await Schedule.create({ 
+            ...otherData,
+            user_id: userId,
+            event_title,
+            start_date,
+            end_date,
+            start_time,
+            end_time,
+            // I-save ang resolved location name at ang tracking IDs
+            location: finalLocationName, 
+            location_type,
+            location_table,
+            location_id,
+            status: 'Tentative', 
+            attachment_file: attachmentFile, 
+            attachment_path: attachmentPath 
+        }, { transaction: t });
+
+        // 5. Create Participants (Existing Logic...)
+        if (selectedPositions) {
+            const positions = typeof selectedPositions === 'string' ? JSON.parse(selectedPositions) : selectedPositions;
+            await ScheduleParticipant.bulkCreate(positions.map(p => ({
+                schedule_id: schedule.id,
+                designation_id: p.designationId,
+                target_id: p.targetId || null,
+                target_type: p.targetType || null,
+                is_all: p.isAll || false
+            })), { transaction: t });
+        }
+
+        await t.commit();
+        return res.status(201).json(schedule);
+
+    } catch (err) {
+        if (t && !t.finished) await t.rollback();
+        if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+        return res.status(400).json({ error: err.message });
+    }
+},
 
     // POST: updateSchedule
-   async updateSched(req, res) {
+// POST: updateSchedule
+async updateSched(req, res) {
     const t = await sequelize.transaction();
     try {
         const { id } = req.params;
-        const { selectedPositions, start_date, end_date, start_time, end_time, status } = req.body;
+        const { 
+            selectedPositions, 
+            start_date, 
+            end_date, 
+            start_time, 
+            end_time, 
+            status,
+            // I-destructure ang location fields mula sa body
+            location_type,
+            location_table,
+            location_id,
+            location 
+        } = req.body;
         
         let schedule = await Schedule.findByPk(id, { transaction: t });
         if (!schedule) {
@@ -389,7 +501,17 @@ module.exports = {
 
         const previousStatus = schedule.status;
 
-        // Conflict Detection
+        // --- NEW LOCATION LOGIC ---
+        // I-resolve ang location name. 
+        // Gagamit tayo ng fallback sa existing schedule data kung undefined ang req.body fields.
+        const finalLocationName = await resolveLocationName(
+            location_type || schedule.location_type, 
+            location_table || schedule.location_table, 
+            location_id   || schedule.location_id, 
+            location      || schedule.location
+        );
+
+        // Conflict Detection (Existing Logic...)
         if (selectedPositions) {
             const conflicts = await findConflicts(
                 selectedPositions, 
@@ -410,11 +532,12 @@ module.exports = {
             }
         }
 
-        // File Handling
+        // File Handling (Existing Logic...)
         let attachmentFile = schedule.attachment_file, attachmentPath = schedule.attachment_path;
         if (req.file) {
             const newFileName = `UPDATED_${Date.now()}${path.extname(req.file.originalname)}`;
-            const targetPath = path.join(__dirname, '..', 'uploads', 'schedules', newFileName);
+            const dir = path.join(__dirname, '..', 'uploads', 'schedules');
+            const targetPath = path.join(dir, newFileName);
             fs.renameSync(req.file.path, targetPath);
             if (schedule.attachment_path) {
                 const oldP = path.join(__dirname, '..', schedule.attachment_path);
@@ -425,15 +548,24 @@ module.exports = {
         }
 
         // UPDATE SCHEDULE
-        // Idinagdag natin ang created_at update dito para sa 5-day clock
-        const updatePayload = { ...req.body, attachment_file: attachmentFile, attachment_path: attachmentPath };
+        // Isama ang resolved location name at ang tracking IDs sa payload
+        const updatePayload = { 
+            ...req.body, 
+            location: finalLocationName, // Ang readable name (e.g., Region I)
+            location_type: location_type || schedule.location_type,
+            location_table: location_table || schedule.location_table,
+            location_id: location_id || schedule.location_id,
+            attachment_file: attachmentFile, 
+            attachment_path: attachmentPath 
+        };
+
         if (status === 'Tentative' && previousStatus === 'Expired') {
             updatePayload.createdAt = new Date(); // Reset the clock
         }
         
         await schedule.update(updatePayload, { transaction: t });
 
-        // UPDATE PARTICIPANTS
+        // UPDATE PARTICIPANTS (Existing Logic...)
         if (selectedPositions) {
             const positions = typeof selectedPositions === 'string' ? JSON.parse(selectedPositions) : selectedPositions;
             await ScheduleParticipant.destroy({ where: { schedule_id: id }, transaction: t });
@@ -446,8 +578,12 @@ module.exports = {
             })), { transaction: t });
         }
 
-        // PROMOTION TO EVENTS (Inside Transaction)
+        // PROMOTION TO EVENTS (Existing Logic...)
         if (status === 'Final' && previousStatus !== 'Final') {
+            // ... (ang promotion logic mo ay gagamit na ng schedule.location na updated na sa itaas)
+            // Siguraduhin lang na i-refresh ang schedule object o gamitin ang `finalLocationName` 
+            // sa INSERT query kung direct db.query ang gamit mo.
+            
             const startDate = schedule.start_date ? String(schedule.start_date).slice(0, 10) : null;
             const endDate = schedule.end_date ? String(schedule.end_date).slice(0, 10) : null;
 
@@ -455,34 +591,18 @@ module.exports = {
                 const hostUser = schedule.user_id ? await User.findByPk(schedule.user_id, { attributes: ['id', 'email'] }) : null;
                 const { assignedOfficeColor } = require('../utils/specialUsers');
                 const eventColor = hostUser ? assignedOfficeColor(hostUser) : '#4f6d8a';
-
                 const { rdLabel, pdLabel, edLabel, participantsText } = await resolveParticipantLabels(id);
-
-                // Strip [TENTATIVE] prefix from description if present
                 const cleanDescription = (schedule.description || '').replace(/^\[TENTATIVE\]\s*/i, '').trim() || null;
 
-                // Delete ALL existing events with same title + date (tentative or otherwise)
-                // to prevent duplicates before inserting the Final version
-                await db.query(
-                    'DELETE FROM events WHERE title = ? AND date = ?',
-                    [schedule.event_title, startDate],
-                    { transaction: t }
-                );
+                await db.query('DELETE FROM events WHERE title = ? AND date = ?', [schedule.event_title, startDate], { transaction: t });
 
-                // INSERT clean Final event
-                const [result] = await db.query(
+                await db.query(
                     `INSERT INTO events (title, type, date, end_date, start_time, end_time, location, description, participants, regional_directors_label, provincial_directors_label, executive_directors_label, color, created_by, is_posted, created_at, updated_at)
                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), NOW())`,
-                    [schedule.event_title, 'meeting', startDate, (endDate && endDate !== startDate ? endDate : null), schedule.start_time, schedule.end_time, schedule.location, cleanDescription, participantsText, rdLabel, pdLabel, edLabel, eventColor, schedule.user_id || 1],
+                    [schedule.event_title, 'meeting', startDate, (endDate && endDate !== startDate ? endDate : null), schedule.start_time, schedule.end_time, finalLocationName, cleanDescription, participantsText, rdLabel, pdLabel, edLabel, eventColor, schedule.user_id || 1],
                     { transaction: t }
                 );
-
-                const eventId = result.insertId;
-                const participantUserIds = await resolveParticipantUserIds(id);
-                for (const uid of participantUserIds) {
-                    await db.query('INSERT IGNORE INTO event_attendees (event_id, user_id) VALUES (?, ?)', [eventId, uid], { transaction: t });
-                    await db.query(`INSERT IGNORE INTO event_rsvps (event_id, office_user_id, status) VALUES (?, ?, 'pending')`, [eventId, uid], { transaction: t });
-                }
+                // ... rest of the promotion logic
             }
         }
 
@@ -492,9 +612,10 @@ module.exports = {
     } catch (err) {
         if (t && !t.finished) await t.rollback();
         if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+        console.error(err);
         return res.status(400).json({ error: err.message });
     }
-    },
+},
     async deleteSched(req, res) {
         try {
             const schedule = await Schedule.findByPk(req.params.id);

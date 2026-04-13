@@ -21,6 +21,14 @@ module.exports = (sequelize, DataTypes) => {
     scope: { target_type: 'region' },
     as: 'participants'
   });
+  this.hasMany(models.Schedule, {
+    foreignKey: 'location_id',
+    constraints: false,
+    scope: {
+      location_table: 'regions'
+    },
+    as: 'schedules'
+  });
     }
   }
   Region.init({

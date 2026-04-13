@@ -25,6 +25,14 @@ module.exports = (sequelize, DataTypes) => {
     constraints: false,
     as: 'user_profiles'
   });
+  this.hasMany(models.Schedule, {
+    foreignKey: 'location_id',
+    constraints: false,
+    scope: {
+      location_table: 'ttis'
+    },
+    as: 'schedules'
+  });
     }
   }
   TTI.init({

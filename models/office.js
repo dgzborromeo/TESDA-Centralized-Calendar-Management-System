@@ -30,6 +30,14 @@ module.exports = (sequelize, DataTypes) => {
     scope: { target_type: 'office' },
     as: 'participants'
   });
+  this.hasMany(models.Schedule, {
+    foreignKey: 'location_id',
+    constraints: false,
+    scope: {
+      location_table: 'offices' // Siguraduhin na 'offices' ang sinesave mo sa column na ito
+    },
+    as: 'schedules'
+  });
     }
   }
   Office.init({

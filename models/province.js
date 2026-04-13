@@ -16,11 +16,19 @@ module.exports = (sequelize, DataTypes) => {
           as: 'ttis'
         });
         this.hasMany(models.ScheduleParticipant, {
-    foreignKey: 'target_id',
-    constraints: false,
-    scope: { target_type: 'province' },
-    as: 'participants'
-  });
+          foreignKey: 'target_id',
+          constraints: false,
+          scope: { target_type: 'province' },
+          as: 'participants'
+        });
+        this.hasMany(models.Schedule, {
+          foreignKey: 'location_id',
+          constraints: false,
+          scope: {
+            location_table: 'provinces'
+          },
+          as: 'schedules'
+        });
     }
   }
   Province.init({

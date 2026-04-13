@@ -13,6 +13,32 @@ module.exports = (sequelize, DataTypes) => {
         as: 'schedule_participants'
       });
       this.belongsTo(models.User, { foreignKey: 'user_id', as: 'user' });
+      this.belongsTo(models.Office, {
+        foreignKey: 'location_id',
+        constraints: false,
+        as: 'office_location'
+      });
+
+      // 2. Link to Regions (RO)
+      this.belongsTo(models.Region, {
+        foreignKey: 'location_id',
+        constraints: false,
+        as: 'region_location'
+      });
+
+      // 3. Link to Provinces/Districts (PO)
+      this.belongsTo(models.Province, {
+        foreignKey: 'location_id',
+        constraints: false,
+        as: 'province_location'
+      });
+
+      // 4. Link to TTIs (TI)
+      this.belongsTo(models.TTI, { // Siguraduhin na 'Tti' ang pangalan ng model mo
+        foreignKey: 'location_id',
+        constraints: false,
+        as: 'tti_location'
+      });
     }
   }
 
@@ -66,6 +92,18 @@ module.exports = (sequelize, DataTypes) => {
     status: {
       type: DataTypes.STRING,
       defaultValue: 'Tentative'
+    },
+    location_type: {
+      type: DataTypes.ENUM('CO', 'RO', 'PO', 'TI', 'Others'),
+      allowNull: true
+    },
+    location_table: {
+      type: DataTypes.STRING,
+      allowNull: true
+    },
+    location_id: {
+      type: DataTypes.INTEGER,
+      allowNull: true
     }
   }, {
     sequelize,
