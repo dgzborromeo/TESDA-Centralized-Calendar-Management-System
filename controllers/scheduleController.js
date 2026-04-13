@@ -107,22 +107,21 @@ for (const p of participants) {
 }
 
 const findLocationConflicts = async (location_id, location_table, start_date, end_date, start_time, end_time, excludeScheduleId = null) => {
-    // Kung walang location id o table (halimbawa: Virtual o Others), walang conflict sa venue
-    if (!location_id || !location_table) return [];
+    if (!location_id || !location_table || location_table !== 'provinces') return [];
+
+    // 1. Kunin muna natin ang data ng PROBINSYA na pinipili ngayon (hal. Antique)
+    // para malaman natin kung sino ang affected_id (Hub) nito.
+    const selectedProvince = await Province.findByPk(location_id);
+    if (!selectedProvince) return [];
+
+    const selectedHubId = selectedProvince.affected_id;
 
     return await Schedule.findAll({
         where: {
-            // 1. Wag isama ang sarili kung update
             id: excludeScheduleId ? { [Op.ne]: excludeScheduleId } : { [Op.not]: null },
-            
-            // 2. Hindi Cancelled o Expired
-            status: { [Op.notIn]: ['Cancelled', 'Expired'] }, 
+            status: { [Op.notIn]: ['Cancelled', 'Expired'] },
+            location_table: 'provinces', // Venue conflicts are specific to provinces in this logic
 
-            // 3. Same Venue
-            location_id: location_id,
-            location_table: location_table,
-
-            // 4. DATE & TIME OVERLAP
             [Op.and]: [
                 { start_date: { [Op.lte]: end_date } },
                 { end_date: { [Op.gte]: start_date } },
@@ -133,7 +132,31 @@ const findLocationConflicts = async (location_id, location_table, start_date, en
                     ]
                 }
             ]
-        }
+        },
+        include: [{
+            model: Province,
+            as: 'province_location',
+            required: true,
+            include: [{
+                model: Province,
+                as: 'transit_province',
+                required: false
+            }],
+            where: {
+                [Op.or]: [
+                    // Case A: Sakto silang pareho ng exact venue (Iloilo vs Iloilo)
+                    { id: location_id },
+
+                    // Case B: Ang existing schedule ay gumagamit din ng same Hub (Guimaras vs Antique)
+                    // Ibig sabihin, pareho silang "affected_id = Iloilo"
+                    { affected_id: location_id }, 
+
+                    // Case C: Kung ang pinipili mong venue ngayon ay isang Hub (Iloilo), 
+                    // i-conflict lahat ng schedules na naka-depende sa Hub na ito.
+                    ...(selectedHubId ? [{ id: selectedHubId }, { affected_id: selectedHubId }] : [])
+                ]
+            }
+        }]
     });
 };
 
@@ -340,15 +363,24 @@ async checkConflict(req, res) {
                 }
             }
 
-            // --- 2. LUGAR CONFLICT (New) ---
-            const lConflicts = await findLocationConflicts(location_id, location_table, start_date, effectiveEndDate, start_time, end_time);
-            if (lConflicts.length > 0) {
-                lConflicts.forEach(loc => {
-                    messages.push(`Venue Conflict: The selected location is already booked for "${loc.event_title}"`);
-                    conflictingScheduleIds.push(loc.id);
-                });
-            }
+        const lConflicts = await findLocationConflicts(location_id, location_table, start_date, effectiveEndDate, start_time, end_time);
 
+            if (lConflicts.length > 0) {
+                for (const loc of lConflicts) {
+                    const isExactSameVenue = Number(loc.location_id) === Number(location_id);
+
+                    if (isExactSameVenue) {
+                        messages.push(`The selected office (${loc.location}) is already booked for "${loc.event_title}". Please select a different venue.`);
+                    } else {
+                        // Gamitin na ang 'transit_province' alias
+                        const hub = loc.province_location?.transit_province;
+                        const hubName = hub ? hub.name : "the supporting Provincial Office"; 
+                        
+                        messages.push(`Conflict: The ${hubName} is currently occupied providing assistance for a booking to ${loc.location}. Please select RO as venue.`);
+                    }
+                    conflictingScheduleIds.push(loc.id);
+                }
+            }
             return res.json({
                 hasConflict: messages.length > 0,
                 messages: [...new Set(messages)],

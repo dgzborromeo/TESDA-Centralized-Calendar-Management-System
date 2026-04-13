@@ -29,12 +29,32 @@ module.exports = (sequelize, DataTypes) => {
           },
           as: 'schedules'
         });
+
+        this.belongsTo(models.Province, {
+          foreignKey: 'affected_id',
+          as: 'transit_province'
+        });
+
+        // Kung gusto mo ring makita kung anong mga provinces ang dadaan sa kanya
+        this.hasMany(models.Province, {
+          foreignKey: 'affected_id',
+          as: 'dependent_provinces'
+        });
+
     }
   }
   Province.init({
     region_id: DataTypes.INTEGER,
     name: DataTypes.STRING,
-    direct_flight: DataTypes.BOOLEAN
+    direct_flight: DataTypes.BOOLEAN,
+    affected_id: {
+  type: DataTypes.INTEGER,
+  allowNull: true
+},
+affected_province: {
+  type: DataTypes.STRING,
+  allowNull: true
+}
   }, {
     sequelize,
     modelName: 'Province',
