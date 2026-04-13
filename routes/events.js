@@ -311,6 +311,55 @@ router.get('/', async (req, res) => {
   }
 });
 
+// GET /api/events/my - events created by the logged-in user (all statuses, posted or not)
+router.get('/my', auth, async (req, res) => {
+  try {
+    const cfg = await resolveUserNameConfig(db);
+    const sql = `
+      SELECT e.*, ${cfg.selectExpr('u')} AS creator_name,
+        rs.date AS rescheduled_to_date,
+        rs.end_date AS rescheduled_to_end_date,
+        rs.title AS rescheduled_to_title,
+        (
+          SELECT GROUP_CONCAT(DISTINCT ${cfg.selectExpr('u2')} ORDER BY ${cfg.selectExpr('u2')} SEPARATOR ', ')
+          FROM event_attendees ea
+          JOIN users u2 ON u2.id = ea.user_id
+          WHERE ea.event_id = e.id
+        ) AS participants_summary,
+        (
+          SELECT COUNT(*) FROM event_attachments a
+          WHERE a.event_id = e.id AND a.original_name LIKE '[POSTDOC:%'
+        ) AS post_document_count,
+        (
+          SELECT COUNT(*) FROM event_attachments a
+          WHERE a.event_id = e.id AND a.original_name LIKE '[ATTENDANCE]%'
+        ) AS attendance_count,
+        (
+          SELECT COUNT(*) FROM event_attachments a
+          WHERE a.event_id = e.id AND a.original_name LIKE '[PHOTO:%'
+        ) AS photo_count
+      FROM events e
+      LEFT JOIN users u ON u.id = e.created_by
+      LEFT JOIN events rs ON rs.id = e.rescheduled_to_event_id
+      WHERE e.created_by = ?
+      ORDER BY e.date DESC, e.start_time DESC
+    `;
+    const [events] = await db.query(sql, [req.user.id]);
+    res.json(
+      events.map((e) => ({
+        ...e,
+        date: toYMD(e.date),
+        end_date: e.end_date ? toYMD(e.end_date) : null,
+        rescheduled_to_date: e.rescheduled_to_date ? toYMD(e.rescheduled_to_date) : null,
+        rescheduled_to_end_date: e.rescheduled_to_end_date ? toYMD(e.rescheduled_to_end_date) : null,
+      }))
+    );
+  } catch (err) {
+    console.error('My events:', err);
+    res.status(500).json({ error: 'Failed to fetch your events.' });
+  }
+});
+
 // GET /api/events/conflicts - count conflicts for current user's events
 router.get('/conflicts', async (req, res) => {
   try {
