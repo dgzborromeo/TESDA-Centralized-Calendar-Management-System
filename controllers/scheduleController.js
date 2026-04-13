@@ -376,7 +376,7 @@ async checkConflict(req, res) {
                         const hub = loc.province_location?.transit_province;
                         const hubName = hub ? hub.name : "the supporting Provincial Office"; 
                         
-                        messages.push(`Conflict: The ${hubName} is currently occupied providing assistance for a booking to ${loc.location}. Please select RO as venue.`);
+                        messages.push(`Conflict: The ${hubName} is currently occupied providing assistance for a booking to ${loc.location}. Please select RO as venue and coordinate internally.`);
                     }
                     conflictingScheduleIds.push(loc.id);
                 }
