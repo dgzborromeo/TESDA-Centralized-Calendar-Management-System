@@ -52,7 +52,13 @@ async function resolveParticipantLabels(scheduleId) {
         ]
     });
 
-    if (!participants.length) return { rdLabel: null, pdLabel: null, edLabel: null, participantsText: null };
+    // Get the schedule to access the participants text field (which may contain focals)
+    const schedule = await Schedule.findByPk(scheduleId);
+    const participantsTextField = schedule?.participants || '';
+
+    if (!participants.length && !participantsTextField) {
+        return { rdLabel: null, pdLabel: null, edLabel: null, participantsText: null };
+    }
 
     const rdNames = [], pdNames = [], edNames = [], allNames = [];
 
@@ -86,6 +92,11 @@ for (const p of participants) {
     }
 
         const label = locationName ? `${posName} ${locationName}` : posName;
+        
+        // Skip if this looks like a focal (shouldn't be in schedule_participants table)
+        // Focals should only be in the participants text field
+        if (posName.toLowerCase().includes('focal')) continue;
+        
         allNames.push(label);
 
         // Grouping logic (Eksaktong gaya ng original mo)
@@ -98,11 +109,32 @@ for (const p of participants) {
         }
     }
 
+    // If there's text in the participants field (focals), combine with allNames
+    // But first, remove duplicates from allNames that are already in focals
+    let finalAllNames = allNames;
+    if (participantsTextField) {
+        // Extract focal names (remove "Focal:" prefix)
+        const focalNames = participantsTextField
+            .split(',')
+            .map(f => f.replace(/^Focal:\s*/i, '').trim().toLowerCase())
+            .filter(Boolean);
+        
+        // Filter out allNames that are duplicates of focals
+        finalAllNames = allNames.filter(name => {
+            const nameLower = name.toLowerCase().trim();
+            return !focalNames.includes(nameLower);
+        });
+    }
+    
+    const finalParticipantsText = participantsTextField 
+        ? (finalAllNames.length ? `${finalAllNames.join(', ')}, ${participantsTextField}` : participantsTextField)
+        : (finalAllNames.length ? finalAllNames.join(', ') : null);
+
     return {
         rdLabel: rdNames.length ? [...new Set(rdNames)].join(', ') : null,
         pdLabel: pdNames.length ? [...new Set(pdNames)].join(', ') : null,
         edLabel: edNames.length ? [...new Set(edNames)].join(', ') : null,
-        participantsText: allNames.length ? allNames.join(', ') : null,
+        participantsText: finalParticipantsText,
     };
 }
 
@@ -495,6 +527,59 @@ let allConflictMessages = [];
             })), { transaction: t });
         }
 
+        // 6. Handle Focals - save ONLY focals to participants text field
+        // But filter out duplicates of existing participants
+        if (req.body.selectedFocals) {
+            const focals = typeof req.body.selectedFocals === 'string' ? JSON.parse(req.body.selectedFocals) : req.body.selectedFocals;
+            console.log('🔍 BACKEND - Received focals:', focals);
+            if (Array.isArray(focals) && focals.length > 0) {
+                // Get existing participant names from schedule_participants
+                const existingParticipants = await ScheduleParticipant.findAll({
+                    where: { schedule_id: schedule.id },
+                    include: [
+                        { model: Position, as: 'designation' },
+                        { model: Region, as: 'region', required: false },
+                        { model: Province, as: 'province', required: false },
+                        { model: Office, as: 'office', required: false },
+                        { model: Cluster, as: 'cluster', required: false },
+                        { model: TTI, as: 'tti', required: false }
+                    ],
+                    transaction: t
+                });
+                
+                // Extract names from existing participants
+                const existingNames = new Set();
+                for (const p of existingParticipants) {
+                    const posName = p.designation?.name || '';
+                    existingNames.add(posName.toLowerCase().trim());
+                    
+                    // Also add location-specific names
+                    if (p.region) existingNames.add(`${posName} (${p.region.region})`.toLowerCase().trim());
+                    if (p.province) existingNames.add(`${posName} (${p.province.name})`.toLowerCase().trim());
+                    if (p.office) existingNames.add(`${posName} (${p.office.name})`.toLowerCase().trim());
+                    if (p.cluster) existingNames.add(`${posName} (${p.cluster.name})`.toLowerCase().trim());
+                    if (p.tti) existingNames.add(`${posName} (${p.tti.name})`.toLowerCase().trim());
+                }
+                
+                // Filter out focals that are duplicates of existing participants
+                const uniqueFocals = focals.filter(f => {
+                    const focalName = String(f).toLowerCase().trim();
+                    return !existingNames.has(focalName);
+                });
+                
+                console.log('🔍 BACKEND - Unique focals after filtering:', uniqueFocals);
+                
+                if (uniqueFocals.length > 0) {
+                    const focalText = uniqueFocals.map(f => `Focal: ${f}`).join(', ');
+                    console.log('🔍 BACKEND - Focal text to save:', focalText);
+                    
+                    // Save ONLY unique focals to participants field
+                    await schedule.update({ participants: focalText }, { transaction: t });
+                    console.log('✅ BACKEND - Focals saved to database');
+                }
+            }
+        }
+
         await t.commit();
         return res.status(201).json(schedule);
 
@@ -730,6 +815,11 @@ async getAllSched(req, res) {
         const formattedData = await Promise.all(data.map(async (sched) => {
             const plainSched = sched.get({ plain: true });
             plainSched.host_name = plainSched.user?.name || "Unknown User";
+            
+            // DEBUG: Log the participants field
+            if (plainSched.id) {
+                console.log(`📋 Schedule ID ${plainSched.id} - participants field:`, plainSched.participants);
+            }
 
             // Compute days as tentative and warning flag
             const created = new Date(plainSched.createdAt);
@@ -785,6 +875,33 @@ async getAllSched(req, res) {
                         location: locationName
                     };
                 }));
+            }
+
+            // Add focals from the participants text field
+            if (plainSched.participants) {
+                const participantsText = plainSched.participants;
+                console.log(`🔍 Schedule ID ${plainSched.id} - participants field:`, participantsText);
+                
+                // More flexible regex to match "Focal: Name" pattern
+                const focalMatches = participantsText.match(/Focal:\s*([^,]+)/gi);
+                console.log(`🔍 Schedule ID ${plainSched.id} - focal matches:`, focalMatches);
+                
+                if (focalMatches && focalMatches.length > 0) {
+                    focalMatches.forEach((match, idx) => {
+                        const focalName = match.replace(/^Focal:\s*/i, '').trim();
+                        console.log(`✅ Schedule ID ${plainSched.id} - adding focal #${idx}:`, focalName);
+                        plainSched.participantDetails.push({
+                            id: `focal-${plainSched.id}-${idx}`,
+                            designation: 'Focal',
+                            location: focalName
+                        });
+                    });
+                    console.log(`✅ Schedule ID ${plainSched.id} - Total participantDetails:`, plainSched.participantDetails.length);
+                } else {
+                    console.log(`⚠️ Schedule ID ${plainSched.id} - No focal matches found`);
+                }
+            } else {
+                console.log(`⚠️ Schedule ID ${plainSched.id} - No participants field`);
             }
 
             plainSched.rawParticipants = sourceParticipants.map(p => ({
