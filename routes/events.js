@@ -777,6 +777,10 @@ router.post('/:id/cancel', requireAdmin, async (req, res) => {
         return res.status(400).json({ error: 'End time must be after start time.' });
       }
 
+      // Get existing attendees to copy to rescheduled event
+      const [existingAttendees] = await conn.query('SELECT user_id FROM event_attendees WHERE event_id = ?', [eventId]);
+      const attendeeIds = existingAttendees.map((r) => r.user_id);
+
       const [inserted] = await conn.query(
         `INSERT INTO events (
           title, type, date, end_date, start_time, end_time, location, description, color, created_by, status, rescheduled_from_event_id
