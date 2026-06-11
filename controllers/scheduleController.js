@@ -442,8 +442,11 @@ async checkConflict(req, res) {
             location_table,
             location_id,
             location, // Ito yung manual input string
+            type, // Meeting type field
             ...otherData 
         } = req.body;
+
+        console.log('🔍 BACKEND - Received type field:', type);
 
         // --- NEW LOCATION LOGIC ---
         // Tatawagin natin ang helper function para makuha ang tamang pangalan
@@ -501,6 +504,7 @@ let allConflictMessages = [];
             ...otherData,
             user_id: userId,
             event_title,
+            type, // Explicitly include meeting type
             start_date,
             end_date,
             start_time,
@@ -607,8 +611,11 @@ async updateSched(req, res) {
             location_type,
             location_table,
             location_id,
-            location 
+            location,
+            type // Meeting type field
         } = req.body;
+        
+        console.log('🔍 BACKEND UPDATE - Received type field:', type);
         
         let schedule = await Schedule.findByPk(id, { transaction: t });
         if (!schedule) {
@@ -713,10 +720,14 @@ async updateSched(req, res) {
 
                 await db.query('DELETE FROM events WHERE title = ? AND date = ?', [schedule.event_title, startDate], { transaction: t });
 
+                // Use schedule.type if available, fallback to 'Face to Face' for backward compatibility
+                const meetingType = schedule.type || 'Face to Face';
+                console.log('🔍 BACKEND PROMOTE - Schedule type:', schedule.type, '→ Event type:', meetingType);
+
                 await db.query(
                     `INSERT INTO events (title, type, date, end_date, start_time, end_time, location, description, participants, regional_directors_label, provincial_directors_label, executive_directors_label, color, created_by, is_posted, created_at, updated_at)
                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), NOW())`,
-                    [schedule.event_title, 'meeting', startDate, (endDate && endDate !== startDate ? endDate : null), schedule.start_time, schedule.end_time, finalLocationName, cleanDescription, participantsText, rdLabel, pdLabel, edLabel, eventColor, schedule.user_id || 1],
+                    [schedule.event_title, meetingType, startDate, (endDate && endDate !== startDate ? endDate : null), schedule.start_time, schedule.end_time, finalLocationName, cleanDescription, participantsText, rdLabel, pdLabel, edLabel, eventColor, schedule.user_id || 1],
                     { transaction: t }
                 );
                 // ... rest of the promotion logic
@@ -1060,11 +1071,15 @@ async getAllSched(req, res) {
                 ? (baseDescription.startsWith('[TENTATIVE]') ? baseDescription : `[TENTATIVE]\n${baseDescription}`.trim())
                 : baseDescription;
 
+            // Use schedule.type if available, fallback to 'Face to Face' for backward compatibility
+            const meetingType = schedule.type || 'Face to Face';
+            console.log('🔍 BACKEND POST TOGGLE - Schedule type:', schedule.type, '→ Event type:', meetingType);
+
             const [result] = await db.query(
                 `INSERT INTO events (title, type, date, end_date, start_time, end_time, location, description, participants, regional_directors_label, provincial_directors_label, executive_directors_label, color, created_by, is_posted, created_at, updated_at)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), NOW())`,
                 [
-                    eventTitle, 'meeting', startDate,
+                    eventTitle, meetingType, startDate,
                     endDate && endDate !== startDate ? endDate : null,
                     schedule.start_time, schedule.end_time,
                     schedule.location || null, eventDescription,
